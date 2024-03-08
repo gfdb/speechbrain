@@ -230,7 +230,7 @@ valid_beam_size: 10
 test_beam_size: 66
 
 # Scoring parameters
-lm_weight: 0.60
+lm_weight: 0
 ctc_weight_decode: 0.40
 
 # Download and prepare the dataset of noisy sequences for augmentation
