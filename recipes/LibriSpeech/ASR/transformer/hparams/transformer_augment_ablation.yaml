@@ -100,7 +100,7 @@ enable_add_reverb: False
 enable_add_noise: False
 enable_speed_perturb: False
 enable_drop_freq: False
-enable_drop_chunk: True
+enable_drop_chunk: False
 enable_clipping: False
 enable_rand_amp: False
 enable_babble_noise: False
