@@ -314,8 +314,10 @@ if __name__ == "__main__":
             "skip_prep": hparams["skip_prep"],
         },
     )
-    sb.utils.distributed.run_on_main(hparams["prepare_noise_data"])
-    sb.utils.distributed.run_on_main(hparams["prepare_rir_data"])
+    if "prepare_noise_data" in hparams:
+        sb.utils.distributed.run_on_main(hparams["prepare_noise_data"])
+    if "prepare_rir_data" in hparams:
+        sb.utils.distributed.run_on_main(hparams["prepare_rir_data"])
 
     # Defining tokenizer and loading it
     tokenizer = SentencePiece(
