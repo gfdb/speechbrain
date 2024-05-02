@@ -30,18 +30,17 @@ Authors
  * Dominik Wagner 2022
 """
 import functools
+import logging
 import os
 import sys
+from pathlib import Path
 
 import torch
-import logging
-
 import torchaudio
+from hyperpyyaml import load_hyperpyyaml
 
 import speechbrain as sb
-from speechbrain.utils.distributed import run_on_main, if_main_process
-from hyperpyyaml import load_hyperpyyaml
-from pathlib import Path
+from speechbrain.utils.distributed import if_main_process, run_on_main
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +54,8 @@ class ASR(sb.Brain):
         hparams=None,
         run_opts=None,
         checkpointer=None,
-        profiler=None,
         normalize_fn=None,
     ):
-
         self.normalize_fn = normalize_fn
 
         super().__init__(
@@ -67,7 +64,6 @@ class ASR(sb.Brain):
             hparams=hparams,
             run_opts=run_opts,
             checkpointer=checkpointer,
-            profiler=profiler,
         )
 
     def compute_forward(self, batch, stage):
@@ -127,12 +123,16 @@ class ASR(sb.Brain):
         tokens_eos, tokens_eos_lens = batch.tokens_eos
         tokens, tokens_lens = batch.tokens
 
+        # Labels must be extended if parallel augmentation or concatenated
+        # augmentation was performed on the input (increasing the time dimension)
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
-            tokens = self.hparams.wav_augment.replicate_labels(tokens)
-            tokens_lens = self.hparams.wav_augment.replicate_labels(tokens_lens)
-            tokens_eos = self.hparams.wav_augment.replicate_labels(tokens_eos)
-            tokens_eos_lens = self.hparams.wav_augment.replicate_labels(
-                tokens_eos_lens
+            (
+                tokens,
+                tokens_lens,
+                tokens_eos,
+                tokens_eos_lens,
+            ) = self.hparams.wav_augment.replicate_multiple_labels(
+                tokens, tokens_lens, tokens_eos, tokens_eos_lens
             )
 
         loss_seq = self.hparams.seq_cost(
@@ -197,7 +197,8 @@ class ASR(sb.Brain):
                 valid_stats=stage_stats,
             )
             self.checkpointer.save_and_keep_only(
-                meta={"WER": stage_stats["WER"]}, min_keys=["WER"],
+                meta={"WER": stage_stats["WER"]},
+                min_keys=["WER"],
             )
         elif stage == sb.Stage.TEST:
             self.hparams.train_logger.log_stats(
@@ -211,11 +212,13 @@ class ASR(sb.Brain):
 
 def dataio_prepare(hparams):
     """This function prepares the datasets to be used in the brain class.
-    It also defines the data processing pipeline through user-defined functions."""
+    It also defines the data processing pipeline through user-defined functions.
+    """
     data_folder = hparams["data_folder"]
 
     train_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
-        csv_path=hparams["train_csv"], replacements={"data_root": data_folder},
+        csv_path=hparams["train_csv"],
+        replacements={"data_root": data_folder},
     )
 
     if hparams["sorting"] == "ascending":
@@ -240,7 +243,8 @@ def dataio_prepare(hparams):
         )
 
     valid_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
-        csv_path=hparams["valid_csv"], replacements={"data_root": data_folder},
+        csv_path=hparams["valid_csv"],
+        replacements={"data_root": data_folder},
     )
     valid_data = valid_data.filtered_sorted(sort_key="duration")
 
@@ -280,7 +284,8 @@ def dataio_prepare(hparams):
         # Maybe resample to 16kHz
         if int(info.sample_rate) != int(hparams["sample_rate"]):
             resampled = torchaudio.transforms.Resample(
-                info.sample_rate, hparams["sample_rate"],
+                info.sample_rate,
+                hparams["sample_rate"],
             )(sig)
 
         resampled = resampled.transpose(0, 1).squeeze(1)
@@ -314,14 +319,15 @@ def dataio_prepare(hparams):
 
     # 4. Set output:
     sb.dataio.dataset.set_output_keys(
-        datasets, ["id", "sig", "words", "tokens_bos", "tokens_eos", "tokens"],
+        datasets,
+        ["id", "sig", "words", "tokens_bos", "tokens_eos", "tokens"],
     )
     train_batch_sampler = None
     valid_batch_sampler = None
     if hparams["dynamic_batching"]:
-        from speechbrain.dataio.sampler import DynamicBatchSampler  # noqa
-        from speechbrain.dataio.dataloader import SaveableDataLoader  # noqa
         from speechbrain.dataio.batch import PaddedBatch  # noqa
+        from speechbrain.dataio.dataloader import SaveableDataLoader  # noqa
+        from speechbrain.dataio.sampler import DynamicBatchSampler  # noqa
 
         dynamic_hparams = hparams["dynamic_batch_sampler"]
         hop_size = hparams["feats_hop_size"]
@@ -348,7 +354,6 @@ def dataio_prepare(hparams):
 
 
 if __name__ == "__main__":
-
     # CLI:
     hparams_file, run_opts, overrides = sb.parse_arguments(sys.argv[1:])
 
@@ -366,8 +371,8 @@ if __name__ == "__main__":
     )
 
     # Dataset prep (parsing Switchboard)
-    from switchboard_prepare import prepare_switchboard  # noqa
     from normalize_util import normalize_words, read_glm_csv  # noqa
+    from switchboard_prepare import prepare_switchboard  # noqa
 
     # multi-gpu (ddp) save data preparation
     run_on_main(

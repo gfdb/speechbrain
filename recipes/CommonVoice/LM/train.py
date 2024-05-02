@@ -8,21 +8,21 @@ Author
  * Pooneh Mousavi 2023
 """
 
-import os
 import csv
-import sys
 import logging
-import speechbrain as sb
-from speechbrain.utils.distributed import run_on_main
+import os
+import sys
+
 from hyperpyyaml import load_hyperpyyaml
 
+import speechbrain as sb
+from speechbrain.utils.distributed import run_on_main
 
 logger = logging.getLogger(__name__)
 
 
 def csv2text():
-    """Read CSV file and convert specific data entries into text file.
-    """
+    """Read CSV file and convert specific data entries into text file."""
     annotation_file = open(hparams["train_csv"], "r")
     reader = csv.reader(annotation_file)
     headers = next(reader, None)
@@ -70,7 +70,7 @@ if __name__ == "__main__":
         )
         csv2text()
 
-    logger.info(f"Start tarining {hparams['ngram']}-gram kenlm model.")
+    logger.info(f"Start training {hparams['ngram']}-gram kenlm model.")
     tmp_ngram_file = "ngram.arpa"
     cmd = f'lmplz -o {hparams["ngram"]} <"{hparams["text_file"]}" > "{tmp_ngram_file}"'
     os.system(cmd)
@@ -81,7 +81,7 @@ if __name__ == "__main__":
         for line in read_file:
             if not has_added_eos and "ngram 1=" in line:
                 count = line.strip().split("=")[-1]
-                write_file.write(line.replace(f"{count}", f"{int(count)+1}"))
+                write_file.write(line.replace(f"{count}", f"{int(count) + 1}"))
             elif not has_added_eos and "<s>" in line:
                 write_file.write(line)
                 write_file.write(line.replace("<s>", "</s>"))

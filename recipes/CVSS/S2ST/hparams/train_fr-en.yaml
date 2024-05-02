@@ -59,7 +59,7 @@ wav2vec2_download_path: !ref <save_folder>/pretrained_models
 wav2vec2_frozen: False
 wav2vec2_freeze_steps: 10000
 
-# Training parameters
+####################### Training Parameters ####################################
 lr: 0.0005
 lr_wav2vec: 0.00001
 loss_reduction: batchmean
@@ -203,7 +203,7 @@ epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
 train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
     save_file: !ref <train_log>
 
-valid_search: !new:speechbrain.decoders.seq2seq.S2STransformerGreedySearch
+valid_search: !new:speechbrain.decoders.seq2seq.S2STransformerGreedySearcher
     modules: [!ref <transformer>, !ref <seq_lin>, null]
     bos_index: !ref <bos_index>
     eos_index: !ref <eos_index>
