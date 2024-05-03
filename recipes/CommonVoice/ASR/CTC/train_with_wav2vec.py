@@ -54,6 +54,11 @@ class ASR(sb.core.Brain):
 
         # Forward pass
         feats = self.modules.wav2vec2(wavs, wav_lens)
+
+        # Add feature augmentation if specified.
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            feats, fea_lens = self.hparams.fea_augment(feats, wav_lens)
+
         x = self.modules.enc(feats)
         logits = self.modules.ctc_lin(x)
         p_ctc = self.hparams.log_softmax(logits)
@@ -80,6 +85,10 @@ class ASR(sb.core.Brain):
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             tokens = self.hparams.wav_augment.replicate_labels(tokens)
             tokens_lens = self.hparams.wav_augment.replicate_labels(tokens_lens)
+
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            tokens = self.hparams.fea_augment.replicate_labels(tokens)
+            tokens_lens = self.hparams.fea_augment.replicate_labels(tokens_lens)
 
         loss = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
 
