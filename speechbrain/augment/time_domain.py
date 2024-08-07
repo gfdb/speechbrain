@@ -1472,11 +1472,10 @@ class DropBitResolution(torch.nn.Module):
         dequantized_tensor = quantized_tensor.to(torch.float32) / scale_factor
         return dequantized_tensor
 
-
 class ChunkSwap(torch.nn.Module):
     """
     This module swaps multiple chunks of the input waveform.
-    
+
     Arguments
     ---------
     num_chunks : int
@@ -1493,7 +1492,7 @@ class ChunkSwap(torch.nn.Module):
 
         if self.chunk_size_frac < 0 or self.chunk_size_frac > 1:
             raise ValueError("chunk_size_frac must be between 0 and 1.")
-        
+
         if self.num_chunks < 2:
             raise ValueError("num_chunks must be at least 2.")
 
@@ -1519,22 +1518,29 @@ class ChunkSwap(torch.nn.Module):
 
         if chunk_size == 0:
             return waveforms
-        
-        augmented_waveforms = waveforms.clone()
-        
-        chunk_starting_indices = []
-        for i in range(self.num_chunks):
-            
-            sample_low = chunk_starting_indices[-1] + chunk_size if chunk_starting_indices else 0
-            sample_high = total_time - (chunk_size * self.num_chunks - i) - chunk_size
 
-            chunk_starting_indices.append(torch.randint(sample_low, sample_high, (1,)).item())
-        
+        augmented_waveforms = waveforms.clone()
+        chunk_starting_indices = list()
+        device = waveforms.device
+
+        # special case where number of chunks perfectly divide waveform
+        if (1 / self.num_chunks) == self.chunk_size_frac:
+            chunk_starting_indices = [i * chunk_size for i in range(self.num_chunks)]
+        else:
+            for i in range(self.num_chunks):
+                sample_low = chunk_starting_indices[-1] + chunk_size if chunk_starting_indices else 0
+                print('sample_low:', sample_low)
+                sample_high = total_time - (chunk_size * (self.num_chunks - i))
+                print('sample_high:', sample_high)
+                chunk_starting_indices.append(torch.randint(sample_low, sample_high, (1,)).item())
+
+        print('chunk_starting_indices:', chunk_starting_indices)
+        print(chunk_size)
         permuted_indices = random.sample(range(self.num_chunks), self.num_chunks)
         new_positions = [chunk_starting_indices[idx] for idx in permuted_indices]
 
-        shift_mask = torch.arange(total_time).reshape(1, -1).expand(batch_size, -1)
+        shift_mask = torch.arange(total_time, device = device).reshape(1, -1).expand(batch_size, -1).clone()
         for original_start, new_start in zip(chunk_starting_indices, new_positions):
-            shift_mask[:, original_start:original_start+chunk_size] = torch.arange(new_start, new_start + chunk_size).reshape(1, -1).expand(batch_size, -1)
+            shift_mask[:, original_start:original_start+chunk_size] = torch.arange(new_start, new_start + chunk_size, device=device).reshape(1, -1).expand(batch_size, -1)
 
         return augmented_waveforms.gather(1, shift_mask)
