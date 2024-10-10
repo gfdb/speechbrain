@@ -10,6 +10,9 @@ import torch
 import torch.nn.functional as F
 
 from speechbrain.utils.callchains import lengths_arg_exists
+from typing import Union
+from .augment_block import AugmentBlock
+
 from speechbrain.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -133,7 +136,7 @@ class Augmenter(torch.nn.Module):
         self.repeat_augment = repeat_augment
         self.augment_prob = augment_prob
         # Check min and max augmentations
-        self.check_min_max_augmentations()
+        self.check_min_max_augmentations(self)
 
         # This variable represents the total number of augmentations to perform for each signal,
         # including the original signal in the count.
@@ -404,7 +407,8 @@ class Augmenter(torch.nn.Module):
 
         return output, output_lengths
 
-    def concatenate_outputs(self, augment_lst, augment_len_lst):
+    @staticmethod
+    def concatenate_outputs(augment_lst, augment_len_lst):
         """
         Concatenate a list of augmented signals, accounting for varying temporal lengths.
         Padding is applied to ensure all signals can be concatenated.
@@ -527,13 +531,14 @@ class Augmenter(torch.nn.Module):
 
         return augmented_labels
 
-    def check_min_max_augmentations(self):
+    @staticmethod
+    def check_min_max_augmentations(augment_obj: Union['Augmenter', 'AugmentBlock']):
         """Checks the min_augmentations and max_augmentations arguments."""
-        if self.min_augmentations is None:
-            self.min_augmentations = 1
-        if self.max_augmentations is None:
-            self.max_augmentations = len(self.augmentations)
-        if self.max_augmentations > len(self.augmentations):
-            self.max_augmentations = len(self.augmentations)
-        if self.min_augmentations > len(self.augmentations):
-            self.min_augmentations = len(self.augmentations)
+        if augment_obj.min_augmentations is None:
+            augment_obj.min_augmentations = 1
+        if augment_obj.max_augmentations is None:
+            augment_obj.max_augmentations = len(augment_obj.augmentations)
+        if augment_obj.max_augmentations > len(augment_obj.augmentations):
+            augment_obj.max_augmentations = len(augment_obj.augmentations)
+        if augment_obj.min_augmentations > len(augment_obj.augmentations):
+            augment_obj.min_augmentations = len(augment_obj.augmentations)
