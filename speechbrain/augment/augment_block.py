@@ -14,6 +14,7 @@ import torch.nn.functional as F
 
 from speechbrain.utils.callchains import lengths_arg_exists
 from .augmenter import Augmenter
+from typing import List, Union, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class AugmentBlock(torch.nn.Module):
         concat_start_index: int = 0,
         concat_end_index: int = None,
         block_prob: float = 1.0,
-        augmentations: list = list(),
+        augmentations: list = [],
         enable_augmentations: list = None,
     ):
         self.augment_type = augment_type
@@ -148,8 +149,81 @@ class AugmentBlock(torch.nn.Module):
 
 
 
-    def augment(self, x: torch.Tensor, lengths: torch.Tensor):
+    def augment(
+        self,
+        x: Union[torch.Tensor, List[torch.Tensor]],
+        lengths: Union[torch.Tensor, List[torch.Tensor]]
+    ):
+        outputs, output_lens = [], []
+        
+        if isinstance(x, list):
+            multi_out, multi_lens = self._augment_multi(
+                x, lengths
+            )
+        else:
+            out, lens = self._augment_single(
+                x, lengths
+            )
+        
+        for batch, lens in zip(x, lengths):
+            num_augmentations = torch.randint(
+                low=self.min_augmentations,
+                high=self.max_augmentations + 1,
+                size=(1,),
+                device=batch.device,
+            )
 
+            # Get augmentations list
+            augmentations_lst = list(self.augmentations.keys())
+
+            # No augmentation
+            if (
+                self.repeat_augment == 0
+                or self.N_augment == 0
+                or len(augmentations_lst) == 0
+            ):
+                self.do_augment = False
+                return batch, lengths
+
+            # Shuffle augmentation
+            if self.shuffle_augmentations:
+                random.shuffle(augmentations_lst)
+            
+            selected_augmentations = augmentations_lst[0 : num_augmentations]
+            
+            for aug_obj, aug_name in selected_augmentations:
+                if self.augment_type == "parallel":
+                    aug_outs, aug_lens = self._apply_parallel_augmentations(
+                        batch, lengths, aug_obj
+                    )
+                elif self.augment_type == "sequential":
+                    aug_outs, aug_lens = self._apply_sequential_augmentations(
+                        batch, lengths, aug_obj
+                    )
+                outputs.append(aug_outs)
+                output_lens.append(aug_lens)
+
+    def _augment_multi(
+        self,
+        x: List[torch.Tensor],
+        lengths: List[torch.Tensor]
+    ) -> Tuple[List[torch.Tensor]]:
+        # apply augmentation to each batch given
+        # this happens when a parallel block
+        # is followed by a sequential block
+        out_lst, out_lens_lst = [], []
+        for batch, batch_lens in zip(x, lengths):
+            aug_out, aug_out_lens = self._augment_single(
+                batch, batch_lens
+            )
+
+
+    def _augment_single(
+        self,
+        x: torch.Tensor,
+        lengths: torch.Tensor
+    ) -> Tuple[torch.Tensor]:
+        
         num_augmentations = torch.randint(
             low=self.min_augmentations,
             high=self.max_augmentations + 1,
@@ -173,12 +247,29 @@ class AugmentBlock(torch.nn.Module):
         if self.shuffle_augmentations:
             random.shuffle(augmentations_lst)
         
-        selected_augmentations = augmentations_lst[0 : self.N_augment]
+        selected_augmentations = augmentations_lst[0 : num_augmentations]
         
-        if self.augment_type == "parallel":
-            pass
-        elif self.augment_type == "sequential":
-            pass
+        outputs, output_lens = [], []
+        for aug_obj, aug_name in selected_augmentations:
+            if self.augment_type == "parallel":
+                # this can return a list of tensors
+                aug_outs, aug_lens = self._apply_parallel_augmentations(
+                    x, lengths, aug_obj, aug_name
+                )
+            elif self.augment_type == "sequential":
+                aug_outs, aug_lens = self._apply_sequential_augmentations(
+                    x, lengths, aug_obj, aug_name
+                )
+            outputs.append(aug_outs)
+            output_lens.append(aug_lens)
+        
+        if self.augment_type == "parallel" and len(selected_augmentations) > 1:
+            # TODO: handle flattenning for parallel output
+            flat_outs, flat_lens = [], []
+            for output in outputs:
+                if isinstance(output, list):
+                    
+
     
     def _concatenate_original(
             self,
@@ -214,8 +305,39 @@ class AugmentBlock(torch.nn.Module):
                         self.concat_start_index : self.concat_end_index_batch
                     ]
                 )
-    def _apply_parallel_augmentations():
-        pass
+    def _apply_parallel_augmentations(
+        self,
+        x: Union[torch.Tensor, List[torch.Tensor]],
+        lengths: Union[torch.Tensor, List[torch.Tensor]],
+        aug_obj: Union[torch.nn.Module, 'AugmentBlock'],
+        aug_name: str
+    ) -> Tuple[List[torch.Tensor]]:
+        output_list = []
+        output_len_list = []
 
-    def _apply_sequential_augmentations():
-        pass
+        # if `x` is a list of tensors, apply augmentations
+        # apply augmentation logic to each tensor in the list
+        if isinstance(x, list):
+            pass
+        else:
+            pass
+
+    def _apply_sequential_augmentations(
+        self,
+        x: torch.Tensor,
+        lengths: torch.Tensor,
+        aug_obj: Union[torch.nn.Module, 'AugmentBlock'],
+        aug_name: str
+    ) -> Tuple[torch.Tensor]:
+
+        # TODO: add slicing logic for aug_start/end
+        kwargs = {}
+
+        # add 'lengths' keyword argument if required
+        # for this augmentation
+        if self.require_lengths[aug_name]:
+            kwargs['lengths'] = lengths #[idx]
+        
+        out, lens = aug_obj(x, **kwargs)
+        return out, lens
+        
