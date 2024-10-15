@@ -7,16 +7,14 @@ Authors
 import random
 
 import torch
-import torch.nn.functional as F
 
 from speechbrain.utils.callchains import lengths_arg_exists
 from typing import Union
-from .augment_block import AugmentBlock
+from .augment_helpers import concatenate_outputs, check_min_max_augmentations
 
 from speechbrain.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
 
 class Augmenter(torch.nn.Module):
     """Applies pipelines of data augmentation.
@@ -136,7 +134,7 @@ class Augmenter(torch.nn.Module):
         self.repeat_augment = repeat_augment
         self.augment_prob = augment_prob
         # Check min and max augmentations
-        self.check_min_max_augmentations(self)
+        check_min_max_augmentations(self)
 
         # This variable represents the total number of augmentations to perform for each signal,
         # including the original signal in the count.
@@ -273,7 +271,7 @@ class Augmenter(torch.nn.Module):
 
         if self.parallel_augment:
             # Concatenate all the augmented data
-            output, output_lengths = self.concatenate_outputs(
+            output, output_lengths = concatenate_outputs(
                 output, output_lengths
             )
         else:
@@ -401,61 +399,12 @@ class Augmenter(torch.nn.Module):
         # Concatenate the final outputs while handling scenarios where
         # different temporal dimensions may arise due to augmentations
         # like speed change.
-        output, output_lengths = self.concatenate_outputs(
+        output, output_lengths = concatenate_outputs(
             output_lst, output_len_lst
         )
 
         return output, output_lengths
 
-    @staticmethod
-    def concatenate_outputs(augment_lst, augment_len_lst):
-        """
-        Concatenate a list of augmented signals, accounting for varying temporal lengths.
-        Padding is applied to ensure all signals can be concatenated.
-
-        Arguments
-        ---------
-        augment_lst : List of torch.Tensor
-            List of augmented signals to be concatenated.
-        augment_len_lst : List of torch.Tensor
-            List of lengths corresponding to the augmented signals.
-
-        Returns
-        -------
-        concatenated_signals : torch.Tensor
-            A tensor containing the concatenated signals.
-        concatenated_lengths : torch.Tensor
-            A tensor containing the concatenated signal lengths.
-
-        Notes
-        -----
-        This function takes a list of augmented signals, which may have different temporal
-        lengths due to variations such as speed changes. It pads the signals to match the
-        maximum temporal dimension found among the input signals and rescales the lengths
-        accordingly before concatenating them.
-        """
-
-        # Find the maximum temporal dimension (batch length) among the sequences
-        max_len = max(augment.shape[1] for augment in augment_lst)
-
-        # Rescale the sequence lengths to adjust for augmented batches with different temporal dimensions.
-        augment_len_lst = [
-            length * (output.shape[1] / max_len)
-            for length, output in zip(augment_len_lst, augment_lst)
-        ]
-
-        # Pad sequences to match the maximum temporal dimension.
-        # Note that some augmented batches, like those with speed changes, may have different temporal dimensions.
-        augment_lst = [
-            F.pad(output, (0, max_len - output.shape[1]))
-            for output in augment_lst
-        ]
-
-        # Concatenate the padded sequences and rescaled lengths
-        output = torch.cat(augment_lst, dim=0)
-        output_lengths = torch.cat(augment_len_lst, dim=0)
-
-        return output, output_lengths
 
     def replicate_multiple_labels(self, *args):
         """
@@ -530,15 +479,3 @@ class Augmenter(torch.nn.Module):
         augmented_labels = torch.cat(augmented_labels, dim=0)
 
         return augmented_labels
-
-    @staticmethod
-    def check_min_max_augmentations(augment_obj: Union['Augmenter', 'AugmentBlock']):
-        """Checks the min_augmentations and max_augmentations arguments."""
-        if augment_obj.min_augmentations is None:
-            augment_obj.min_augmentations = 1
-        if augment_obj.max_augmentations is None:
-            augment_obj.max_augmentations = len(augment_obj.augmentations)
-        if augment_obj.max_augmentations > len(augment_obj.augmentations):
-            augment_obj.max_augmentations = len(augment_obj.augmentations)
-        if augment_obj.min_augmentations > len(augment_obj.augmentations):
-            augment_obj.min_augmentations = len(augment_obj.augmentations)
