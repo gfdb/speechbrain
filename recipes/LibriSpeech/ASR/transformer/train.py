@@ -34,6 +34,7 @@ Authors
  * Titouan Parcollet 2021, 2022
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -43,9 +44,8 @@ from hyperpyyaml import load_hyperpyyaml
 
 import speechbrain as sb
 from speechbrain.utils.distributed import if_main_process, run_on_main
-from speechbrain.utils.logger import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 # Define training procedure
@@ -55,6 +55,17 @@ class ASR(sb.core.Brain):
         batch = batch.to(self.device)
         wavs, wav_lens = batch.sig
         tokens_bos, _ = batch.tokens_bos
+
+        # Add waveform augmentation if specified.
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
+            wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
+            tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
+        
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "augment_block_1"):
+            wavs, wav_lens = self.hparams.augment_block_1(wavs, wav_lens)
+            tokens_bos = self.hparams.augment_block_1.replicate_labels(tokens_bos)
+            wavs, wav_lens = self.hparams.augment_block_2(wavs, wav_lens)
+            tokens_bos = self.hparams.augment_block_2.replicate_labels(tokens_bos)
 
         # compute features
         feats = self.hparams.compute_features(wavs)
@@ -116,16 +127,49 @@ class ASR(sb.core.Brain):
         tokens, tokens_lens = batch.tokens
 
         if stage == sb.Stage.TRAIN:
-            # Labels must be extended if parallel augmentation or concatenated
-            # augmentation was performed on the input (increasing the time dimension)
+            if hasattr(self.hparams, "wav_augment"):
+                tokens = self.hparams.wav_augment.replicate_labels(tokens)
+                tokens_lens = self.hparams.wav_augment.replicate_labels(
+                    tokens_lens
+                )
+                tokens_eos = self.hparams.wav_augment.replicate_labels(
+                    tokens_eos
+                )
+                tokens_eos_lens = self.hparams.wav_augment.replicate_labels(
+                    tokens_eos_lens
+                )
             if hasattr(self.hparams, "fea_augment"):
-                (
-                    tokens,
-                    tokens_lens,
-                    tokens_eos,
-                    tokens_eos_lens,
-                ) = self.hparams.fea_augment.replicate_multiple_labels(
-                    tokens, tokens_lens, tokens_eos, tokens_eos_lens
+                tokens = self.hparams.fea_augment.replicate_labels(tokens)
+                tokens_lens = self.hparams.fea_augment.replicate_labels(
+                    tokens_lens
+                )
+                tokens_eos = self.hparams.fea_augment.replicate_labels(
+                    tokens_eos
+                )
+                tokens_eos_lens = self.hparams.fea_augment.replicate_labels(
+                    tokens_eos_lens
+                )
+            if hasattr(self.hparams, "augment_block_1"):
+                tokens = self.hparams.augment_block_1.replicate_labels(tokens)
+                tokens_lens = self.hparams.augment_block_1.replicate_labels(
+                    tokens_lens
+                )
+                tokens_eos = self.hparams.augment_block_1.replicate_labels(
+                    tokens_eos
+                )
+                tokens_eos_lens = self.hparams.augment_block_1.replicate_labels(
+                    tokens_eos_lens
+                )
+                
+                tokens = self.hparams.augment_block_2.replicate_labels(tokens)
+                tokens_lens = self.hparams.augment_block_2.replicate_labels(
+                    tokens_lens
+                )
+                tokens_eos = self.hparams.augment_block_2.replicate_labels(
+                    tokens_eos
+                )
+                tokens_eos_lens = self.hparams.augment_block_2.replicate_labels(
+                    tokens_eos_lens
                 )
 
         loss_seq = self.hparams.seq_cost(
@@ -408,6 +452,11 @@ if __name__ == "__main__":
             "skip_prep": hparams["skip_prep"],
         },
     )
+    if "prepare_noise_data" in hparams: 
+        sb.utils.distributed.run_on_main(hparams["prepare_noise_data"])
+    if "prepare_rir_data" in hparams:
+        sb.utils.distributed.run_on_main(hparams["prepare_rir_data"])
+
 
     # here we create the datasets objects as well as tokenization and encoding
     (
@@ -421,7 +470,7 @@ if __name__ == "__main__":
 
     # We download the pretrained LM from HuggingFace (or elsewhere depending on
     # the path given in the YAML file). The tokenizer is loaded at the same time.
-    hparams["pretrainer"].collect_files()
+    run_on_main(hparams["pretrainer"].collect_files)
     hparams["pretrainer"].load_collected()
 
     # Trainer initialization

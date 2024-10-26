@@ -59,7 +59,7 @@ class AugmentBlock(torch.nn.Module):
 
         # This variable represents the total number of augmentations to perform for each signal,
         # including the original signal in the count.
-        self.num_augmentations = None
+        self.total_augmentations = 0
         self.do_augment = True
 
 
@@ -101,6 +101,7 @@ class AugmentBlock(torch.nn.Module):
 
     def forward(self, x: torch.Tensor, lengths: torch.Tensor):
         print('forward:')
+        self.total_augmentations = 0
         self.do_augment = True
         if random.random() > self.block_prob:
             self.do_augment = False
@@ -129,12 +130,12 @@ class AugmentBlock(torch.nn.Module):
         # Perform augmentations
         aug_out, aug_out_lens = x, lengths
         for _ in range(self.repeat_block):
-            print('repeating...')
+            # print('repeating...')
             aug_out, aug_out_lens = self.augment(aug_out, aug_out_lens)
             # print('\t aug_out.shape:', aug_out.shape)
             # print('\t aug_out_lens.shape:', aug_out_lens.shape)
 
-        print('\t type(aug_out):', type(aug_out))
+        # print('\t type(aug_out):', type(aug_out))
         if isinstance(aug_out, list):
             output_lst.extend(aug_out)
             output_len_lst.extend(aug_out_lens)
@@ -157,13 +158,13 @@ class AugmentBlock(torch.nn.Module):
             output_lst, output_len_lst = concatenate_outputs(
                 output_lst, output_len_lst
             )
-        print('\t type(output_lst):', type(output_lst))
-        print('\t len(output_lst):', len(output_lst))
-        print('\t type(output_lst[0]):', type(output_lst[0]))
-        print('\t output_lst[0].shape:', output_lst[0].shape)
-        print("==============")
-        print('forward complete')
-        print("==============")
+        # print('\t type(output_lst):', type(output_lst))
+        # print('\t len(output_lst):', len(output_lst))
+        # print('\t type(output_lst[0]):', type(output_lst[0]))
+        # print('\t output_lst[0].shape:', output_lst[0].shape)
+        # print("==============")
+        # print('forward complete')
+        # print("==============")
         return output_lst, output_len_lst
 
 
@@ -172,11 +173,11 @@ class AugmentBlock(torch.nn.Module):
         x: Union[torch.Tensor, List[torch.Tensor]],
         lengths: Union[torch.Tensor, List[torch.Tensor]]
     ):
-        print('augment:')
+        # print('augment:')
         if isinstance(x, list):
-            print('\t x is a list')
+            # print('\t x is a list')
             return self._augment_multi(x, lengths)
-        print('\t x is NOT a list')
+        # print('\t x is NOT a list')
         return self._augment_single_batch(x, lengths)
 
     
@@ -186,9 +187,9 @@ class AugmentBlock(torch.nn.Module):
         x: List[torch.Tensor],
         lengths: List[torch.Tensor]
     ) -> Union[Tuple[torch.Tensor], Tuple[List[torch.Tensor]]]:
-        print('_augment_multi')
-        print('\t type(x):', type(x))
-        print('\t len(x):', len(x))
+        # print('_augment_multi')
+        # print('\t type(x):', type(x))
+        # print('\t len(x):', len(x))
         # Apply augmentation to each batch given.
         # This will happen when a parallel block
         # is followed by a sequential block.
@@ -197,24 +198,24 @@ class AugmentBlock(torch.nn.Module):
             # print('batch_lens', batch_lens)
             if isinstance(batch, list):
                 raise ValueError('batch should not be a list')
-                print('\t batch is a list')
-                print(f'\t len: {len(batch)}')
+                # print('\t batch is a list')
+                # print(f'\t len: {len(batch)}')
             aug_out, aug_out_lens = self._augment_single_batch(
                 batch, batch_lens
             )
             # if a list is returned (parallel and n_aug > 1)
             if isinstance(aug_out, list):
-                print('\t aug_out is a list')
+                # print('\t aug_out is a list')
                 out_lst.extend(aug_out)
                 out_lens_lst.extend(aug_out_lens)
             else:
-                print('\t aug_out is NOT a list')
+                # print('\t aug_out is NOT a list')
                 out_lst.append(aug_out)
                 out_lens_lst.append(aug_out_lens)
 
-        print('+++++++++++++++++++++++++')
-        print('_augment_multi complete')        
-        print('+++++++++++++++++++++++++')
+        # print('+++++++++++++++++++++++++')
+        # print('_augment_multi complete')        
+        # print('+++++++++++++++++++++++++')
         return out_lst, out_lens_lst
 
 
@@ -235,8 +236,8 @@ class AugmentBlock(torch.nn.Module):
         tensors will be returned, else if parallel and num_aug = 1 or
         sequential, a tuple of tensors will be returned.
         """
-        print('_augment_single_batch')
-        print('\t x shape:', x.shape)
+        # print('_augment_single_batch')
+        # print('\t x shape:', x.shape)
         # print('lengths:', lengths)
         
         num_augmentations = torch.randint(
@@ -246,7 +247,8 @@ class AugmentBlock(torch.nn.Module):
             device=x.device,
         ).item()
 
-        print('\t num_augmentations:', num_augmentations)
+        self.total_augmentations += num_augmentations
+        # print('\t num_augmentations:', num_augmentations)
 
         # Get augmentations list
         augmentations_lst = list(self.augmentations.keys())
@@ -265,7 +267,7 @@ class AugmentBlock(torch.nn.Module):
             random.shuffle(augmentations_lst)
         
         selected_augmentations = augmentations_lst[0 : num_augmentations]
-        print('\t selected_augmentations:', selected_augmentations)
+        # print('\t selected_augmentations:', selected_augmentations)
         
         outputs, output_lens = [], [lengths]
         
@@ -277,7 +279,7 @@ class AugmentBlock(torch.nn.Module):
             
 
         for aug_key in selected_augmentations:
-            print('\t', aug_key)
+            # print('\t', aug_key)
             # this can return a list (of tuples) of tensors
             if self.augment_type == "parallel":
                 aug_outs, aug_lens = self._apply_augmentation(
@@ -308,7 +310,7 @@ class AugmentBlock(torch.nn.Module):
                     # flatten if this is the last augmentation in the loop
                     outputs, output_lens = outputs[0], output_lens[0]
         
-        print('\t len(outputs):', len(outputs))
+        # print('\t len(outputs):', len(outputs))
         return outputs, output_lens
             
     
@@ -373,7 +375,7 @@ class AugmentBlock(torch.nn.Module):
         # TODO: add slicing logic for aug_start/end
         kwargs = {}
         if self.require_lengths[aug_name]:
-            # print(f"{aug_name} requires lengths")
+            print(f"{aug_name} requires lengths")
             kwargs['lengths'] = lengths
         
         out = aug_obj(x, **kwargs)
@@ -393,3 +395,73 @@ class AugmentBlock(torch.nn.Module):
             else:
                 raise TypeError(f"Unexpected type {type(item)} encountered. Expected list or torch.Tensor.")
         return flat_list
+    
+
+    def replicate_multiple_labels(self, *args):
+        """
+        Replicates the labels along the batch axis a number of times that
+        corresponds to the number of augmentations. Indeed parallel and
+        concatenation augmentations alter the time dimension.
+
+        Arguments
+        ---------
+        *args : tuple
+            Input label tensors to be replicated. Can be a uniq or a list of
+            torch.Tensors.
+
+        Returns
+        -------
+        augmented_labels: torch.Tensor
+            Labels corresponding to the augmented input. Returns as many torch.Tensor
+            as given in input.
+        """
+
+        # Determine whether to apply data augmentation
+        if not self.do_augment:
+            return args
+
+        list_of_augmented_labels = []
+
+        for labels in args:
+            list_of_augmented_labels.append(self.replicate_labels(labels))
+
+        return list_of_augmented_labels
+
+    def replicate_labels(self, labels):
+        """
+        Replicates the labels along the batch axis a number of times that
+        corresponds to the number of augmentations. Indeed parallel and
+        concatenation augmentations alter the time dimension.
+
+        Arguments
+        ---------
+        labels : torch.Tensor
+            Input label tensors to be replicated.
+
+        Returns
+        -------
+        augmented_labels: torch.Tensor
+            Labels corresponding to the augmented input. Returns as many torch.Tensor
+            as given in input.
+        """
+
+        # Determine whether to apply data augmentation
+        if not self.do_augment:
+            return labels
+        
+        augmented_labels = []
+        
+        selected_labels = labels
+
+        if self.augment_type == 'parallel':
+            selected_labels = torch.cat(
+                [selected_labels] * self.total_augmentations, dim=0
+            )
+
+        augmented_labels = (
+            augmented_labels + [selected_labels] * self.repeat_block
+        )
+
+        augmented_labels = torch.cat(augmented_labels, dim=0)
+
+        return augmented_labels
