@@ -39,11 +39,13 @@ import sys
 from pathlib import Path
 
 import torch
+import random
 from hyperpyyaml import load_hyperpyyaml
 
 import speechbrain as sb
 from speechbrain.utils.distributed import if_main_process, run_on_main
 from speechbrain.utils.logger import get_logger
+from speechbrain.dataio.dataset import FilteredSortedDynamicItemDataset
 
 logger = get_logger(__name__)
 
@@ -252,6 +254,13 @@ def dataio_prepare(hparams):
         csv_path=hparams["train_csv"],
         replacements={"data_root": data_folder},
     )
+    print('total samples:', len(train_data))
+    num_samples = int(len(train_data) * hparams["dataset_fraction"])
+    print('total ids:', len(train_data.data_ids))
+    sampled_ids = random.sample(train_data.data_ids, num_samples)
+    train_data = FilteredSortedDynamicItemDataset(train_data, sampled_ids)
+    print('num_samples_subset:', len(train_data)) 
+    print('total ids:', len(train_data.data_ids))
 
     if hparams["sorting"] == "ascending":
         # we sort training data to speed up training and get better results.
@@ -400,7 +409,7 @@ if __name__ == "__main__":
         kwargs={
             "data_folder": hparams["data_folder"],
             "tr_splits": hparams["train_splits"],
-            "dev_splits": hparams["dev_splits"],
+            "dev_splits": [],
             "te_splits": hparams["test_splits"],
             "save_folder": hparams["output_folder"],
             "merge_lst": hparams["train_splits"],
@@ -409,6 +418,19 @@ if __name__ == "__main__":
         },
     )
 
+    run_on_main(
+        prepare_librispeech,
+        kwargs={
+            "data_folder": hparams["data_folder"],
+            "tr_splits": [],
+            "dev_splits": hparams["dev_splits"],
+            "te_splits": [],
+            "save_folder": hparams["output_folder"],
+            "merge_lst": hparams["dev_splits"],
+            "merge_name": "dev.csv",
+            "skip_prep": hparams["skip_prep"],
+        },
+    )
     # here we create the datasets objects as well as tokenization and encoding
     (
         train_data,
