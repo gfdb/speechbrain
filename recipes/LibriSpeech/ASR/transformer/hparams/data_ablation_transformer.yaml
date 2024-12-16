@@ -147,16 +147,23 @@ test_beam_size: 66
 lm_weight: 0.60
 ctc_weight_decode: 0.40
 
+cnn_num_blocks: 3
+cnn_num_layers_per_block: 1
+cnn_out_channels: (64, 64, 64)
+cnn_kernel_sizes: (5, 5, 1)
+cnn_strides: (2, 2, 1)
+cnn_residuals: (False, False, True)
+
 ############################## Models ##########################################
 
 CNN: !new:speechbrain.lobes.models.convolution.ConvolutionFrontEnd
     input_shape: (8, 10, 80)
-    num_blocks: 3
-    num_layers_per_block: 1
-    out_channels: (64, 64, 64)
-    kernel_sizes: (5, 5, 1)
-    strides: (2, 2, 1)
-    residuals: (False, False, True)
+    num_blocks: !ref <cnn_num_blocks>
+    num_layers_per_block: !ref <cnn_num_layers_per_block>
+    out_channels: !ref <cnn_out_channels>
+    kernel_sizes: !ref <cnn_kernel_sizes>
+    strides: !ref <cnn_strides>
+    residuals: !ref <cnn_residuals>
 
 Transformer: !new:speechbrain.lobes.models.transformer.TransformerASR.TransformerASR # yamllint disable-line rule:line-length
     input_size: 1280
@@ -271,9 +278,11 @@ seq_cost: !name:speechbrain.nnet.losses.kldiv_loss
     label_smoothing: !ref <label_smoothing>
     reduction: !ref <loss_reduction>
 
+
+noam_n_warmup_steps: 25000
 noam_annealing: !new:speechbrain.nnet.schedulers.NoamScheduler
     lr_initial: !ref <lr_adam>
-    n_warmup_steps: 25000
+    n_warmup_steps: !ref <noam_n_warmup_steps>
 
 checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
     checkpoints_dir: !ref <save_folder>
