@@ -152,6 +152,7 @@ cnn_num_layers_per_block: 1
 cnn_out_channels: (64, 64, 64)
 cnn_kernel_sizes: (5, 5, 1)
 cnn_strides: (2, 2, 1)
+cnn_dilations: (1, 1, 1)
 cnn_residuals: (False, False, True)
 
 ############################## Models ##########################################
@@ -162,6 +163,7 @@ CNN: !new:speechbrain.lobes.models.convolution.ConvolutionFrontEnd
     num_layers_per_block: !ref <cnn_num_layers_per_block>
     out_channels: !ref <cnn_out_channels>
     kernel_sizes: !ref <cnn_kernel_sizes>
+    dilations: !ref <cnn_dilations>
     strides: !ref <cnn_strides>
     residuals: !ref <cnn_residuals>
 
