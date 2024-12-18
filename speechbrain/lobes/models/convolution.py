@@ -210,14 +210,6 @@ class ConvolutionFrontEnd(Sequential):
         dilations,  # tuple/list, e.g. (1, 1, 1)
         residuals,  # tuple/list, e.g. (False, False, True)
     ):
-        # TODO: add support for padding
-        assert (
-            len(out_channels)
-            == len(kernel_sizes)
-            == len(strides)
-            == len(dilations)
-            == len(residuals)
-        )
         C, H, W = input_shape
         for i in range(len(out_channels)):
             # Update channels
@@ -232,7 +224,7 @@ class ConvolutionFrontEnd(Sequential):
             W = math.ceil(W / strides[i])
 
         # After all blocks, flatten (C, H, W) into a single feature dimension for the transformer:
-        transformer_input_size = C * H * W
+        transformer_input_size = C * W
         return transformer_input_size
 
 
