@@ -203,27 +203,45 @@ class ConvolutionFrontEnd(Sequential):
 
     @staticmethod
     def compute_transformer_input_size(
-        input_shape,  # (C, H, W)
-        out_channels,  # tuple/list, e.g. (64, 64, 64)
-        kernel_sizes,  # tuple/list, e.g. (5, 5, 1)
-        strides,  # tuple/list, e.g. (2, 2, 1)
-        dilations,  # tuple/list, e.g. (1, 1, 1)
-        residuals,  # tuple/list, e.g. (False, False, True)
+        input_shape,          # (C, H, W)
+        out_channels,         # tuple/list of length num_blocks
+        kernel_sizes,         # tuple/list of length num_blocks
+        strides,              # tuple/list of length num_blocks
+        dilations,            # tuple/list of length num_blocks
+        residuals,            # tuple/list of length num_blocks
+        num_layers_per_block  # int: number of layers in each block
     ):
+        
+        # TODO: add support for other padding
         C, H, W = input_shape
-        for i in range(len(out_channels)):
-            # Update channels
+
+        num_blocks = len(out_channels)
+        # Ensure all per-block lists have the same length as out_channels
+        assert len(kernel_sizes) == num_blocks
+        assert len(strides) == num_blocks
+        assert len(dilations) == num_blocks
+        assert len(residuals) == num_blocks
+
+        for i in range(num_blocks):
+            # Each block has num_layers_per_block layers.
+            # All layers except the last have stride=1 (no dimension change with 'same' padding)
+            # The last layer applies strides[i].
+            # Out_channels is set after all layers in the block are applied.
+            
+            # Process layers within the block
+            for layer_idx in range(num_layers_per_block):
+                if layer_idx == num_layers_per_block - 1:
+                    # Apply the block's stride on the last layer
+                    H = math.ceil(H / strides[i])
+                    W = math.ceil(W / strides[i])
+                else:
+                    # Earlier layers have stride=1, so no dimension change for 'same' padding.
+                    pass
+            
+            # Update the number of channels after completing the block
             C = out_channels[i]
 
-            # With "same" padding, output dimension ~ ceil(input_dim / stride)
-            # Dilation doesn't affect spatial downsampling when using same padding, it affects the kernel field.
-            # Kernel size also doesn't reduce the dimension due to "same" padding.
-            # Stride is the main factor that reduces the dimension.
-
-            H = math.ceil(H / strides[i])
-            W = math.ceil(W / strides[i])
-
-        # After all blocks, flatten (C, H, W) into a single feature dimension for the transformer:
+        # Flatten the final output shape to get the transformer's input dimension
         transformer_input_size = C * W
         return transformer_input_size
 
