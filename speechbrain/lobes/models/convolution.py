@@ -14,6 +14,7 @@ from speechbrain.utils.filter_analysis import (
     FilterProperties,
     stack_filter_properties,
 )
+import math
 
 
 class ConvolutionalSpatialGatingUnit(torch.nn.Module):
@@ -199,6 +200,40 @@ class ConvolutionFrontEnd(Sequential):
         return stack_filter_properties(
             block.get_filter_properties() for block in self.children()
         )
+
+    @staticmethod
+    def compute_transformer_input_size(
+        input_shape,  # (C, H, W)
+        out_channels,  # tuple/list, e.g. (64, 64, 64)
+        kernel_sizes,  # tuple/list, e.g. (5, 5, 1)
+        strides,  # tuple/list, e.g. (2, 2, 1)
+        dilations,  # tuple/list, e.g. (1, 1, 1)
+        residuals,  # tuple/list, e.g. (False, False, True)
+    ):
+        # TODO: add support for padding
+        assert (
+            len(out_channels)
+            == len(kernel_sizes)
+            == len(strides)
+            == len(dilations)
+            == len(residuals)
+        )
+        C, H, W = input_shape
+        for i in range(len(out_channels)):
+            # Update channels
+            C = out_channels[i]
+
+            # With "same" padding, output dimension ~ ceil(input_dim / stride)
+            # Dilation doesn't affect spatial downsampling when using same padding, it affects the kernel field.
+            # Kernel size also doesn't reduce the dimension due to "same" padding.
+            # Stride is the main factor that reduces the dimension.
+
+            H = math.ceil(H / strides[i])
+            W = math.ceil(W / strides[i])
+
+        # After all blocks, flatten (C, H, W) into a single feature dimension for the transformer:
+        transformer_input_size = C * H * W
+        return transformer_input_size
 
 
 class ConvBlock(torch.nn.Module):
