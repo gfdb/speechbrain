@@ -175,6 +175,7 @@ transformer_input_size: !applyref:speechbrain.lobes.models.convolution.Convoluti
     strides: !ref <cnn_strides>
     dilations: !ref <cnn_dilations>
     residuals: !ref <cnn_residuals>
+    num_layers_per_block: !ref <cnn_num_layers_per_block>
 
 Transformer: !new:speechbrain.lobes.models.transformer.TransformerASR.TransformerASR # yamllint disable-line rule:line-length
     input_size: !ref <transformer_input_size>
