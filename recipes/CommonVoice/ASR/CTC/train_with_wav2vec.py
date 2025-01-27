@@ -54,6 +54,12 @@ class ASR(sb.core.Brain):
 
         # Forward pass
         feats = self.modules.wav2vec2(wavs, wav_lens)
+
+        # Add feature augmentation if specified.
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            feats, fea_lens = self.hparams.fea_augment(feats, wav_lens)
+
+
         x = self.modules.enc(feats)
         logits = self.modules.ctc_lin(x)
         p_ctc = self.hparams.log_softmax(logits)
@@ -76,10 +82,22 @@ class ASR(sb.core.Brain):
         ids = batch.id
         tokens_eos, tokens_eos_lens = batch.tokens_eos
         tokens, tokens_lens = batch.tokens
-
+        
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "toggle_concat"):
+            if self.hparams.toggle_concat:
+                tokens = torch.cat([tokens, tokens], dim = 0)
+                tokens_lens = torch.cat([tokens_lens, tokens_lens], dim = 0)
+                p_ctc = torch.cat([p_ctc, p_ctc], dim = 0)
+                wav_lens = torch.cat([wav_lens, wav_lens], dim = 0)
+        
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             tokens = self.hparams.wav_augment.replicate_labels(tokens)
             tokens_lens = self.hparams.wav_augment.replicate_labels(tokens_lens)
+
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            tokens = self.hparams.fea_augment.replicate_labels(tokens)
+            tokens_lens = self.hparams.fea_augment.replicate_labels(tokens_lens)
+
 
         loss = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
 

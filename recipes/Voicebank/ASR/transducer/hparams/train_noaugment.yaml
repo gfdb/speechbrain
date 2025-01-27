@@ -5,10 +5,10 @@
 # ################################
 
 # Seed needs to be set at top of yaml, before objects with parameters are made
-seed: 1236
+seed: 1237
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <seed>]
 input_type:  noisy_wav
-output_folder: !ref results/<input_type>/augmentation/noaugment/<seed>
+output_folder: !ref /home/gfdb/scratch/results/<input_type>/augmentation/noaugment/<seed>
 per_file: !ref <output_folder>/per.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt

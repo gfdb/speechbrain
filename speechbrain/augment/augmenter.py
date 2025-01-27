@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 
 from speechbrain.utils.callchains import lengths_arg_exists
+from .augment_block import AugmentBlock
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,9 @@ class Augmenter(torch.nn.Module):
         augment_prob=1.0,
         augmentations=list(),
         enable_augmentations=None,
+        concat_augmented=False,
+        randomize_repeat=False,
+        concat_outputs=False
     ):
         super().__init__()
         self.parallel_augment = parallel_augment
@@ -134,11 +138,16 @@ class Augmenter(torch.nn.Module):
         self.augment_prob = augment_prob
         # Check min and max augmentations
         self.check_min_max_augmentations()
-
         # This variable represents the total number of augmentations to perform for each signal,
         # including the original signal in the count.
         self.num_augmentations = None
         self.do_augment = True
+        self.concat_augmented = concat_augmented
+        self.randomize_repeat = randomize_repeat
+        self.concat_outputs = concat_outputs
+
+        if self.concat_augmented and self.concat_original:
+            raise NotImplementedError("support for concat_aug and concat_og at the same time not impemeneted yet.")
 
         # Check repeat augment arguments
         if not isinstance(self.repeat_augment, int):
@@ -175,11 +184,15 @@ class Augmenter(torch.nn.Module):
                 if enabled
             ]
 
+
+        print('Augmentations:', augmentations)
+
         # Turn augmentations into a dictionary
         self.augmentations = {
             augmentation.__class__.__name__ + str(i): augmentation
             for i, augmentation in enumerate(augmentations)
         }
+
 
         if len(self.augmentations) == 0:
             logger.warning(
@@ -233,23 +246,25 @@ class Augmenter(torch.nn.Module):
         out_lengths = lengths
         for k, augment_name in enumerate(selected_augmentations):
             augment_fun = self.augmentations[augment_name]
+            print("current aug:", augment_name)
 
-            idx = torch.arange(x.shape[0])
-            if self.parallel_augment and self.parallel_augment_fixed_bs:
-                idx_startstop = torch.linspace(
-                    0, x.shape[0], len(selected_augmentations) + 1
-                ).to(torch.int)
-                idx_start = idx_startstop[k]
-                idx_stop = idx_startstop[k + 1]
-                idx = idx[idx_start:idx_stop]
+            # TODO: fix indexing logic
+            # idx = torch.arange(x.shape[0])
+            # if self.parallel_augment and self.parallel_augment_fixed_bs:
+            #     idx_startstop = torch.linspace(
+            #         0, x.shape[0], len(selected_augmentations) + 1
+            #     ).to(torch.int)
+            #     idx_start = idx_startstop[k]
+            #     idx_stop = idx_startstop[k + 1]
+            #     idx = idx[idx_start:idx_stop]
 
             # Check input arguments
             if self.require_lengths[augment_name]:
                 out = augment_fun(
-                    next_input[idx, ...], lengths=next_lengths[idx]
+                    next_input, lengths=next_lengths
                 )
             else:
-                out = augment_fun(next_input[idx, ...])
+                out = augment_fun(next_input)
 
             # Check output arguments
             if isinstance(out, tuple):
@@ -261,12 +276,12 @@ class Augmenter(torch.nn.Module):
                     )
 
             # Manage sequential or parallel augmentation
-            if not self.parallel_augment:
-                next_input = out
-                next_lengths = out_lengths[idx]
-            else:
+            if self.parallel_augment:
                 output.append(out)
                 output_lengths.append(out_lengths)
+            else:
+                next_input = out
+                next_lengths = out_lengths
 
         if self.parallel_augment:
             # Concatenate all the augmented data
@@ -277,6 +292,11 @@ class Augmenter(torch.nn.Module):
             # Take the last augmented signal of the pipeline
             output = out
             output_lengths = out_lengths
+        
+        if isinstance(output, list):
+            output, output_lengths = self.concatenate_outputs(
+                output, output_lengths
+            )
 
         return output, output_lengths
 
@@ -298,6 +318,12 @@ class Augmenter(torch.nn.Module):
             The corresponding length of each output.
         """
 
+        print('Forward Augmenter...')
+        if isinstance(x, list):
+            for item in x:
+                print(item.size())
+        else:
+            print(x.size())
         # Determine whether to apply data augmentation
         self.do_augment = True
         if random.random() > self.augment_prob:
@@ -348,7 +374,7 @@ class Augmenter(torch.nn.Module):
 
         # Select the augmentations to apply
         selected_augmentations = augmentations_lst[0 : self.N_augment]
-
+        print('selected_augmentations:', selected_augmentations)
         # Select the portion of the input to augment and update lengths accordingly.
         x = x[self.augment_start_index : self.augment_end_index_batch]
         lengths = lengths[
@@ -361,13 +387,16 @@ class Augmenter(torch.nn.Module):
 
         # Concatenate the original signal if required
         self.skip_concat = not (self.concat_original)
+        print("self.concat_original:", self.concat_original)
         if self.concat_original:
 
             # Check start index
             if self.concat_start_index >= x.shape[0]:
+                print('skipping concat...')
                 self.skip_concat = True
                 pass
             else:
+                print("doing concat...")
                 self.skip_concat = False
                 # Determine the ending index for concatenation, considering user-specified or default values.
                 self.concat_end_index_batch = (
@@ -389,19 +418,40 @@ class Augmenter(torch.nn.Module):
 
         # Perform augmentations
         for i in range(self.repeat_augment):
+
+            if self.randomize_repeat:
+                # randomize the augmentations to apply in sequence
+                random.shuffle(augmentations_lst)
+                selected_augmentations = augmentations_lst[0 : self.N_augment]
+                print('Selected for repeat:', selected_augmentations)
+            
             output, output_lengths = self.augment(
                 x, lengths, selected_augmentations
             )
+            print('aug out:', output.size())
+            # print('aug')
             output_lst.append(output)
             output_len_lst.append(output_lengths)
 
+        if self.concat_augmented:
+            # concatenate the augmented signal with itself
+            # along the batch dimension (indirectly doubling the batch_size)
+            output = output.repeat(2, *([1] * (output.dim() - 1)))
+            output_lengths = output_lengths.repeat(2, *([1] * (output_lengths.dim() - 1)))
+        
+        # print('dims after:', output.shape)
         # Concatenate the final outputs while handling scenarios where
         # different temporal dimensions may arise due to augmentations
         # like speed change.
-        output, output_lengths = self.concatenate_outputs(
-            output_lst, output_len_lst
-        )
+        # if self.concat_outputs:
+        if isinstance(output_lst, list):
+            output, output_lengths = self.concatenate_outputs(
+                output_lst, output_len_lst
+            )
+        else:
+            output, output_lengths = output_lst, output_len_lst
 
+        print('output.size():', output.size())
         return output, output_lengths
 
     def concatenate_outputs(self, augment_lst, augment_len_lst):
@@ -514,14 +564,35 @@ class Augmenter(torch.nn.Module):
             self.augment_start_index : self.augment_end_index_batch
         ]
 
-        if self.parallel_augment:
+        # handle augment block labels
+        augment_blocks = [aug for aug in self.augmentations if 'augmentblock' in aug.lower()]
+
+        if self.parallel_augment and not augment_blocks:
             selected_labels = torch.cat(
                 [selected_labels] * self.N_augment, dim=0
             )
 
-        augmented_labels = (
-            augmented_labels + [selected_labels] * self.repeat_augment
-        )
+        # augmented_labels = (
+        #     augmented_labels + [selected_labels] * self.repeat_augment
+        # )
+
+        print('labels before:', len(augmented_labels))
+        # handle augment block labels
+        print('num_blocks:', len(augment_blocks))
+        if augment_blocks:
+            block_labels = selected_labels
+            for block_name in augment_blocks:
+                block = self.augmentations[block_name]
+                if block.augment_type == 'sequential':
+                    continue
+                block_labels = torch.cat(
+                    [block_labels] * block.total_augmentations, dim=0
+                )
+                print('block_total_augmentations:', block.total_augmentations)
+            augmented_labels = (
+                augmented_labels + [block_labels]
+            )
+                
 
         augmented_labels = torch.cat(augmented_labels, dim=0)
 

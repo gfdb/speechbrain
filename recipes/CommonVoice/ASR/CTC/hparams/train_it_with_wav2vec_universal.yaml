@@ -8,7 +8,7 @@
 # Seed needs to be set at top of yaml, before objects with parameters are made
 seed: 1234
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <seed>]
-output_folder: !ref results/wav2vec2_ctc_it/augment_ablation/<seed>
+output_folder: !ref results/wav2vec2_ctc_it/uni_aug_wav_only/<seed>
 test_wer_file: !ref <output_folder>/wer_test.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
@@ -69,6 +69,7 @@ test_dataloader_options:
 token_type: unigram  # ["unigram", "bpe", "char"]
 character_coverage: 1.0
 
+
 # NOTE ON DATA AUGMENTATION
 # This template demonstrates the use of all available data augmentation strategies
 # to illustrate how they work and how you can combine them with the augmenter.
@@ -77,39 +78,39 @@ character_coverage: 1.0
 
 # Waveform Augmentation Functions
 snr_low: 0  # Min SNR for noise augmentation
-snr_high: 15  # Max SNR for noise augmentation
-speed_changes: [85, 90, 95, 105, 110, 115]  # List of speed changes for time-stretching
+snr_high: 10  # Max SNR for noise augmentation
+speed_changes: [90, 100, 110]  # List of speed changes for time-stretching
 drop_freq_low: 0  # Min frequency band dropout probability
-drop_freq_high: 1  # Max frequency band dropout probability
+drop_freq_high: 1  # Max frequency band dropout probability (1.0 is the largest freq)
 drop_freq_count_low: 1  # Min number of frequency bands to drop
-drop_freq_count_high: 3  # Max number of frequency bands to drop
-drop_freq_width: 0.05  # Width of frequency bands to drop
+drop_freq_count_high: 8  # Max number of frequency bands to drop
+drop_freq_width: 0.1  # Width of frequency bands to drop
 drop_chunk_count_low: 1  # Min number of audio chunks to drop
-drop_chunk_count_high: 3  # Max number of audio chunks to drop
-drop_chunk_length_low: 1000  # Min length of audio chunks to drop
-drop_chunk_length_high: 2000  # Max length of audio chunks to drop
-clip_low: 0.1  # Min amplitude to clip
-clip_high: 0.5  # Max amplitude to clip
+drop_chunk_count_high: 8  # Max number of audio chunks to drop
+drop_chunk_length_low: 0  # Min length of audio chunks to drop
+drop_chunk_length_high: 4000  # Max length of audio chunks to drop
+clip_low: 0  # Min amplitude to clip
+clip_high: 0.75  # Max amplitude to clip
 amp_low: 0.05  # Min waveform amplitude
-amp_high: 1.0  # Max waveform amplitude
-babble_snr_low: 5  # Min SNR for babble (batch sum noise)
-babble_snr_high: 15  # Max SNR for babble (batch sum noise)
+amp_high: 0.5  # Max waveform amplitude
+babble_snr_low: 0  # Min SNR for babble (batch sum noise)
+babble_snr_high: 20  # Max SNR for babble (batch sum noise)
 
 # Feature Augmentation Functions
 min_time_shift: 0  # Min random shift of spectrogram in time
 max_time_shift: 15  # Max random shift of spectrogram in time
 min_freq_shift: 0  # Min random shift of spectrogram in frequency
-max_freq_shift: 5  # Max random shift of spectrogram in frequency
-time_drop_length_low: 5  # Min length for temporal chunk to drop in spectrogram
-time_drop_length_high: 15  # Max length for temporal chunk to drop in spectrogram
-time_drop_count_low: 1  # Min number of chunks to drop in time in the spectrogram
-time_drop_count_high: 3  # Max number of chunks to drop in time in the spectrogram
+max_freq_shift: 2  # Max random shift of spectrogram in frequency
+time_drop_length_low: 0  # Min length for temporal chunk to drop in spectrogram
+time_drop_length_high: 25  # Max length for temporal chunk to drop in spectrogram
+time_drop_count_low: 0  # Min number of chunks to drop in time in the spectrogram
+time_drop_count_high: 2  # Max number of chunks to drop in time in the spectrogram
 time_drop_replace: "zeros"  # Method of dropping chunks
-freq_drop_length_low: 1  # Min length for chunks to drop in frequency in the spectrogram
-freq_drop_length_high: 5  # Max length for chunks to drop in frequency in the spectrogram
-freq_drop_count_low: 1  # Min number of chunks to drop in frequency in the spectrogram
-freq_drop_count_high: 3  # Max number of chunks to drop in frequency in the spectrogram
-freq_drop_replace: "zeros"  # Method of dropping chunks
+freq_drop_length_low: 0  # Min length for chunks to drop in frequency in the spectrogram
+freq_drop_length_high: 8  # Max length for chunks to drop in frequency in the spectrogram
+freq_drop_count_low: 0  # Min number of chunks to drop in frequency in the spectrogram
+freq_drop_count_high: 8  # Max number of chunks to drop in frequency in the spectrogram
+freq_drop_replace: "cutcat"  # Method of dropping chunks
 time_warp_window: 20  # Length of time warping window
 time_warp_mode: "bicubic"  # Time warping method
 freq_warp_window: 4  # Length of frequency warping window
@@ -118,16 +119,16 @@ freq_warp_mode: "bicubic"  # Frequency warping method
 # Enable Waveform Augmentation Flags (useful for hyperparameter tuning)
 enable_codec_augment: False
 enable_add_reverb: False
-enable_add_noise: False
-enable_speed_perturb: False
-enable_drop_freq: False
-enable_drop_chunk: False
-enable_clipping: False
-enable_rand_amp: False
-enable_babble_noise: False
+enable_add_noise: True
+enable_speed_perturb: True
+enable_drop_freq: True
+enable_drop_chunk: True
+enable_clipping: True
+enable_rand_amp: True
+enable_babble_noise: True
 enable_drop_resolution: False
-enable_sign_flip: False
-enable_chunk_swap: False
+enable_sign_flip: True
+enable_chunk_swap: True
 
 # Enable Feature Augmentations Flags (useful for hyperparameter tuning)
 enable_time_shift: False
@@ -141,18 +142,19 @@ enable_freq_warp: False
 time_parallel_augment: False  # Apply augmentations in parallel if True, or sequentially if False
 time_concat_original: True  # Concatenate original signals to the training batch if True
 time_repeat_augment: 1  # Number of times to apply augmentation
-time_shuffle_augmentations: False  # Shuffle order of augmentations if True, else use specified order
+time_shuffle_augmentations: True  # Shuffle order of augmentations if True, else use specified order
 time_min_augmentations: 1  # Min number of augmentations to apply
 time_max_augmentations: 1  # Max number of augmentations to apply
 time_augment_prob: 1.0     # Probability to apply time augmentation
+concat_augmented: False
 
 # Feature Augmenter (combining augmentations)
 fea_parallel_augment: False  # Apply feature augmentations in parallel if True, or sequentially if False
 fea_concat_original: True  # Concatenate original signals to the training batch if True
 fea_repeat_augment: 1  # Number of times to apply feature augmentation
 fea_shuffle_augmentations: True  # Shuffle order of feature augmentations if True, else use specified order
-fea_min_augmentations: 1  # Min number of feature augmentations to apply
-fea_max_augmentations: 1  # Max number of feature augmentations to app
+fea_min_augmentations: 0  # Min number of feature augmentations to apply
+fea_max_augmentations: 0  # Max number of feature augmentations to app
 fea_augment_prob: 1.0     # Probability to apply feature augmentation
 
 
@@ -206,8 +208,7 @@ prepare_rir_data: !name:speechbrain.augment.preparation.prepare_dataset_from_URL
     dest_folder: !ref <data_folder_rir>
     ext: wav
     csv_file: !ref <rir_annotation>
-
-
+    
 # ----- WAVEFORM AUGMENTATION ----- #
 
 # Codec augmentation
@@ -260,16 +261,20 @@ rand_amp: !new:speechbrain.augment.time_domain.RandAmp
     amp_low: !ref <amp_low>
     amp_high: !ref <amp_high>
 
+
 # SignFlip
-sign_flip_prob: 0.5
+sign_flip_prob: 0.6
 sign_flip: !new:speechbrain.augment.time_domain.SignFlip
     flip_prob: !ref <sign_flip_prob>
 
-chunk_size_frac: 0.01
+
+# ChunkSwap
+chunk_size_frac: 0.02
 num_chunks: 2
 chunk_swap: !new:speechbrain.augment.time_domain.ChunkSwap
     num_chunks: !ref <num_chunks>
     chunk_size_frac: !ref <chunk_size_frac>
+
 
 # Noise sequence derived by summing up all the signals in the batch
 # It is similar to babble noise
@@ -295,6 +300,7 @@ wav_augment: !new:speechbrain.augment.augmenter.Augmenter
     min_augmentations: !ref <time_min_augmentations>
     max_augmentations: !ref <time_max_augmentations>
     augment_prob: !ref <time_augment_prob>
+    concat_augmented: !ref <concat_augmented>
     augmentations: [
         !ref <codec_augment>,
         !ref <add_reverb>,
@@ -321,6 +327,7 @@ wav_augment: !new:speechbrain.augment.augmenter.Augmenter
         !ref <enable_drop_resolution>,
         !ref <enable_sign_flip>,
         !ref <enable_chunk_swap>]
+
 
 # ----- FEATURE AUGMENTATION ----- #
 
@@ -380,17 +387,15 @@ fea_augment: !new:speechbrain.augment.augmenter.Augmenter
         !ref <freq_shift>,
         !ref <time_drop>,
         !ref <freq_drop>,
-        !ref <time_warp>,
-        !ref <freq_warp>]
+        !ref <time_warp>]
     enable_augmentations: [
         !ref <enable_time_shift>,
         !ref <enable_freq_shift>,
         !ref <enable_time_drop>,
         !ref <enable_freq_drop>,
-        !ref <enable_time_warp>,
-        !ref <enable_freq_warp>]
+        !ref <enable_time_warp>]
 
-############################## models ################################
+############################# models ################################
 
 enc: !new:speechbrain.nnet.containers.Sequential
     input_shape: [null, null, !ref <wav2vec_output_dim>]

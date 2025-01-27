@@ -32,6 +32,7 @@ class ASR_Brain(sb.Brain):
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
             phns = self.hparams.wav_augment.replicate_labels(phns)
+        
 
         # Model computations
         feats = self.hparams.compute_features(wavs)
@@ -80,6 +81,7 @@ class ASR_Brain(sb.Brain):
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             phns = self.hparams.wav_augment.replicate_labels(phns)
             phn_lens = self.hparams.wav_augment.replicate_labels(phn_lens)
+
         
         if hasattr(self.hparams, "fea_augment"):
                 phns = self.hparams.fea_augment.replicate_labels(phns)

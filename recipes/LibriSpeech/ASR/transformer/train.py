@@ -143,7 +143,7 @@ class ASR(sb.core.Brain):
                 tokens_eos_lens = self.hparams.fea_augment.replicate_labels(
                     tokens_eos_lens
                 )
-
+        
         loss_seq = self.hparams.seq_cost(
             p_seq, tokens_eos, length=tokens_eos_lens
         ).sum()

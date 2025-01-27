@@ -1,73 +1,101 @@
- ################################
-# Model: wav2vec2 + DNN + CTC
-# Augmentation: SpecAugment
-# Authors: Titouan Parcollet 2021
-#          Mirco Ravanelli 2021
+# ################################
+# Model: VGG2 + LiGRU with time pooling for efficiency
+# Additions: TimeDomainSpecAugment
+# Authors: Mirco Ravanelli & Peter Plantinga 2020
 # ################################
 
 # Seed needs to be set at top of yaml, before objects with parameters are made
-seed: 1234
+seed: 1236
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <seed>]
-output_folder: !ref results/wav2vec2_ctc_it/augment_ablation/<seed>
-test_wer_file: !ref <output_folder>/wer_test.txt
-save_folder: !ref <output_folder>/save
-train_log: !ref <output_folder>/train_log.txt
-
-# URL for the biggest Fairseq english wav2vec2 model.
-wav2vec2_hub: facebook-wav2vec2-large-it-voxpopuli
-wav2vec2_folder: !ref <save_folder>/wav2vec2_checkpoint
-
-# Data files
-data_folder: !PLACEHOLDER  # e.g, /localscratch/cv-corpus-5.1-2020-06-22/it
+input_type:  noisy_wav
+output_folder: !ref results/<input_type>/uni_aug_wav_only/<seed>
 data_folder_noise: !ref <data_folder>/noise # The noisy sequencies for data augmentation will automatically be downloaded here.
 data_folder_rir: !ref <data_folder>/rir # The impulse responses used for data augmentation will automatically be downloaded here.
-
-train_tsv_file: !ref <data_folder>/train.tsv  # Standard CommonVoice .tsv files
-dev_tsv_file: !ref <data_folder>/dev.tsv  # Standard CommonVoice .tsv files
-test_tsv_file: !ref <data_folder>/test.tsv  # Standard CommonVoice .tsv files
-accented_letters: False
-language: it # use 'it' for Italian, 'rw' for Kinyarwanda, 'en' for english
-train_csv: !ref <save_folder>/train.csv
-valid_csv: !ref <save_folder>/dev.csv
-test_csv: !ref <save_folder>/test.csv
-noise_annotation: ../noise.csv
-rir_annotation: ../rir.csv
-skip_prep: False # Skip data preparation
+per_file: !ref <output_folder>/per.txt
+save_folder: !ref <output_folder>/save
+train_log: !ref <output_folder>/train_log.txt
+noise_annotation: !ref <data_folder>/noise.csv
+rir_annotation: !ref <data_folder>/rir.csv
 
 # Data for augmentation
 NOISE_DATASET_URL: https://www.dropbox.com/scl/fi/a09pj97s5ifan81dqhi4n/noises.zip?rlkey=j8b0n9kdjdr32o1f06t0cw5b7&dl=1
 RIR_DATASET_URL: https://www.dropbox.com/scl/fi/linhy77c36mu10965a836/RIRs.zip?rlkey=pg9cu8vrpn2u173vhiqyu743u&dl=1
 
-# We remove utterance slonger than 10s in the train/dev/test sets as
-# longer sentences certainly correspond to "open microphones".
-avoid_if_longer_than: 8.0
+# Data files
+data_folder: !PLACEHOLDER  # e.g. /path/to/Voicebank
+train_annotation: !ref <output_folder>/train.json
+valid_annotation: !ref <output_folder>/valid.json
+test_annotation: !ref <output_folder>/test.json
+skip_prep: False # Skip data preparation
 
 # Training parameters
-number_of_epochs: 24
-lr: 1.0
-lr_wav2vec: 0.0001
-sorting: ascending
-precision: fp32 # bf16, fp16 or fp32
-sample_rate: 16000
-ckpt_interval_minutes: 30 # save checkpoint every N min
-
-# With data_parallel batch_size is split into N jobs
-# With DDP batch_size is multiplied by N jobs
-# Must be 8 per GPU to fit 32GB of VRAM
+number_of_epochs: 50
 batch_size: 8
-test_batch_size: 4
-num_workers: 4
-
+sorting: ascending
 dataloader_options:
     batch_size: !ref <batch_size>
+lr: 0.5
+max_grad_norm: 5.0
+
+# Set this to the path of a pretrained model to load before training
+# pretrained: model_clean_ep3.ckpt
+
+# Feature parameters
+sample_rate: 16000
+n_fft: 400
+n_mels: 40
+
+# Model parameters
+activation: !name:torch.nn.LeakyReLU
+dropout: 0.15
+cnn_blocks: 2
+cnn_channels: (128, 256)
+cnn_kernelsize: (3, 3)
+rnn_layers: 4
+rnn_neurons: 512
+rnn_bidirectional: True
+dnn_blocks: 2
+dnn_neurons: 512
+# emb_size: 128
+dec_neurons: 128
+
+# Outputs
+output_neurons: 42
+joint_dim: 128
+blank_index: 0
+
+# Decoding parameters
+beam_size: 4
+nbest: 1
+# by default {state,expand}_beam = 2.3 as mention in paper
+# https://arxiv.org/abs/1904.02619
+state_beam: 1.0
+expand_beam: 1.0
+
+# Dataloader options
+num_workers: 4
+train_dataloader_opts:
+    batch_size: !ref <batch_size>
     num_workers: !ref <num_workers>
-test_dataloader_options:
-    batch_size: !ref <test_batch_size>
+valid_dataloader_opts:
+    batch_size: !ref <batch_size>
     num_workers: !ref <num_workers>
 
-# BPE parameters
-token_type: unigram  # ["unigram", "bpe", "char"]
-character_coverage: 1.0
+test_dataloader_opts:
+    batch_size: !ref <batch_size>
+    num_workers: !ref <num_workers>
+
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+    limit: !ref <number_of_epochs>
+
+compute_features: !new:speechbrain.lobes.features.Fbank
+    sample_rate: !ref <sample_rate>
+    n_fft: !ref <n_fft>
+    n_mels: !ref <n_mels>
+
+normalize: !new:speechbrain.processing.features.InputNormalization
+    norm_type: global
+
 
 # NOTE ON DATA AUGMENTATION
 # This template demonstrates the use of all available data augmentation strategies
@@ -77,39 +105,39 @@ character_coverage: 1.0
 
 # Waveform Augmentation Functions
 snr_low: 0  # Min SNR for noise augmentation
-snr_high: 15  # Max SNR for noise augmentation
-speed_changes: [85, 90, 95, 105, 110, 115]  # List of speed changes for time-stretching
+snr_high: 10  # Max SNR for noise augmentation
+speed_changes: [90, 100, 110]  # List of speed changes for time-stretching
 drop_freq_low: 0  # Min frequency band dropout probability
-drop_freq_high: 1  # Max frequency band dropout probability
+drop_freq_high: 1  # Max frequency band dropout probability (1.0 is the largest freq)
 drop_freq_count_low: 1  # Min number of frequency bands to drop
-drop_freq_count_high: 3  # Max number of frequency bands to drop
-drop_freq_width: 0.05  # Width of frequency bands to drop
+drop_freq_count_high: 8  # Max number of frequency bands to drop
+drop_freq_width: 0.1  # Width of frequency bands to drop
 drop_chunk_count_low: 1  # Min number of audio chunks to drop
-drop_chunk_count_high: 3  # Max number of audio chunks to drop
-drop_chunk_length_low: 1000  # Min length of audio chunks to drop
-drop_chunk_length_high: 2000  # Max length of audio chunks to drop
-clip_low: 0.1  # Min amplitude to clip
-clip_high: 0.5  # Max amplitude to clip
+drop_chunk_count_high: 8  # Max number of audio chunks to drop
+drop_chunk_length_low: 0  # Min length of audio chunks to drop
+drop_chunk_length_high: 4000  # Max length of audio chunks to drop
+clip_low: 0  # Min amplitude to clip
+clip_high: 0.75  # Max amplitude to clip
 amp_low: 0.05  # Min waveform amplitude
-amp_high: 1.0  # Max waveform amplitude
-babble_snr_low: 5  # Min SNR for babble (batch sum noise)
-babble_snr_high: 15  # Max SNR for babble (batch sum noise)
+amp_high: 0.5  # Max waveform amplitude
+babble_snr_low: 0  # Min SNR for babble (batch sum noise)
+babble_snr_high: 20  # Max SNR for babble (batch sum noise)
 
 # Feature Augmentation Functions
 min_time_shift: 0  # Min random shift of spectrogram in time
 max_time_shift: 15  # Max random shift of spectrogram in time
 min_freq_shift: 0  # Min random shift of spectrogram in frequency
-max_freq_shift: 5  # Max random shift of spectrogram in frequency
-time_drop_length_low: 5  # Min length for temporal chunk to drop in spectrogram
-time_drop_length_high: 15  # Max length for temporal chunk to drop in spectrogram
-time_drop_count_low: 1  # Min number of chunks to drop in time in the spectrogram
-time_drop_count_high: 3  # Max number of chunks to drop in time in the spectrogram
+max_freq_shift: 2  # Max random shift of spectrogram in frequency
+time_drop_length_low: 0  # Min length for temporal chunk to drop in spectrogram
+time_drop_length_high: 25  # Max length for temporal chunk to drop in spectrogram
+time_drop_count_low: 0  # Min number of chunks to drop in time in the spectrogram
+time_drop_count_high: 2  # Max number of chunks to drop in time in the spectrogram
 time_drop_replace: "zeros"  # Method of dropping chunks
-freq_drop_length_low: 1  # Min length for chunks to drop in frequency in the spectrogram
-freq_drop_length_high: 5  # Max length for chunks to drop in frequency in the spectrogram
-freq_drop_count_low: 1  # Min number of chunks to drop in frequency in the spectrogram
-freq_drop_count_high: 3  # Max number of chunks to drop in frequency in the spectrogram
-freq_drop_replace: "zeros"  # Method of dropping chunks
+freq_drop_length_low: 0  # Min length for chunks to drop in frequency in the spectrogram
+freq_drop_length_high: 8  # Max length for chunks to drop in frequency in the spectrogram
+freq_drop_count_low: 0  # Min number of chunks to drop in frequency in the spectrogram
+freq_drop_count_high: 8  # Max number of chunks to drop in frequency in the spectrogram
+freq_drop_replace: "cutcat"  # Method of dropping chunks
 time_warp_window: 20  # Length of time warping window
 time_warp_mode: "bicubic"  # Time warping method
 freq_warp_window: 4  # Length of frequency warping window
@@ -118,16 +146,16 @@ freq_warp_mode: "bicubic"  # Frequency warping method
 # Enable Waveform Augmentation Flags (useful for hyperparameter tuning)
 enable_codec_augment: False
 enable_add_reverb: False
-enable_add_noise: False
-enable_speed_perturb: False
-enable_drop_freq: False
-enable_drop_chunk: False
-enable_clipping: False
-enable_rand_amp: False
-enable_babble_noise: False
+enable_add_noise: True
+enable_speed_perturb: True
+enable_drop_freq: True
+enable_drop_chunk: True
+enable_clipping: True
+enable_rand_amp: True
+enable_babble_noise: True
 enable_drop_resolution: False
-enable_sign_flip: False
-enable_chunk_swap: False
+enable_sign_flip: True
+enable_chunk_swap: True
 
 # Enable Feature Augmentations Flags (useful for hyperparameter tuning)
 enable_time_shift: False
@@ -141,57 +169,20 @@ enable_freq_warp: False
 time_parallel_augment: False  # Apply augmentations in parallel if True, or sequentially if False
 time_concat_original: True  # Concatenate original signals to the training batch if True
 time_repeat_augment: 1  # Number of times to apply augmentation
-time_shuffle_augmentations: False  # Shuffle order of augmentations if True, else use specified order
+time_shuffle_augmentations: True  # Shuffle order of augmentations if True, else use specified order
 time_min_augmentations: 1  # Min number of augmentations to apply
 time_max_augmentations: 1  # Max number of augmentations to apply
 time_augment_prob: 1.0     # Probability to apply time augmentation
+concat_augmented: False
 
 # Feature Augmenter (combining augmentations)
 fea_parallel_augment: False  # Apply feature augmentations in parallel if True, or sequentially if False
 fea_concat_original: True  # Concatenate original signals to the training batch if True
 fea_repeat_augment: 1  # Number of times to apply feature augmentation
 fea_shuffle_augmentations: True  # Shuffle order of feature augmentations if True, else use specified order
-fea_min_augmentations: 1  # Min number of feature augmentations to apply
-fea_max_augmentations: 1  # Max number of feature augmentations to app
+fea_min_augmentations: 0  # Min number of feature augmentations to apply
+fea_max_augmentations: 0  # Max number of feature augmentations to app
 fea_augment_prob: 1.0     # Probability to apply feature augmentation
-
-
-# Model parameters
-# activation: !name:torch.nn.LeakyReLU
-wav2vec_output_dim: 1024
-dnn_neurons: 1024
-freeze_wav2vec: False
-freeze_feature_extractor: False
-dropout: 0.15
-warmup_steps: 500
-
-# Outputs
-output_neurons: 1000  # BPE size, index(blank/eos/bos) = 0
-
-# Decoding parameters
-# Be sure that the bos and eos index match with the BPEs ones
-blank_index: 0
-bos_index: 1
-eos_index: 2
-
-# Decoding parameters
-test_beam_search:
-    blank_index: !ref <blank_index>
-    beam_size: 100
-    beam_prune_logp: -12.0
-    token_prune_min_logp: -1.2
-    prune_history: True
-    topk: 1
-    alpha: 1.0
-    beta: 0.5
-    # To use n-gram LM for decoding, follow steps in README.md.
-    #kenlm_model_path: none
-#
-# Functions and classes
-#
-epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
-    limit: !ref <number_of_epochs>
-
 
 # Download and prepare the dataset of noisy sequences for augmentation
 prepare_noise_data: !name:speechbrain.augment.preparation.prepare_dataset_from_URL
@@ -206,7 +197,6 @@ prepare_rir_data: !name:speechbrain.augment.preparation.prepare_dataset_from_URL
     dest_folder: !ref <data_folder_rir>
     ext: wav
     csv_file: !ref <rir_annotation>
-
 
 # ----- WAVEFORM AUGMENTATION ----- #
 
@@ -260,16 +250,20 @@ rand_amp: !new:speechbrain.augment.time_domain.RandAmp
     amp_low: !ref <amp_low>
     amp_high: !ref <amp_high>
 
+
 # SignFlip
-sign_flip_prob: 0.5
+sign_flip_prob: 0.6
 sign_flip: !new:speechbrain.augment.time_domain.SignFlip
     flip_prob: !ref <sign_flip_prob>
 
-chunk_size_frac: 0.01
+
+# ChunkSwap
+chunk_size_frac: 0.02
 num_chunks: 2
 chunk_swap: !new:speechbrain.augment.time_domain.ChunkSwap
     num_chunks: !ref <num_chunks>
     chunk_size_frac: !ref <chunk_size_frac>
+
 
 # Noise sequence derived by summing up all the signals in the batch
 # It is similar to babble noise
@@ -295,6 +289,7 @@ wav_augment: !new:speechbrain.augment.augmenter.Augmenter
     min_augmentations: !ref <time_min_augmentations>
     max_augmentations: !ref <time_max_augmentations>
     augment_prob: !ref <time_augment_prob>
+    concat_augmented: !ref <concat_augmented>
     augmentations: [
         !ref <codec_augment>,
         !ref <add_reverb>,
@@ -321,6 +316,7 @@ wav_augment: !new:speechbrain.augment.augmenter.Augmenter
         !ref <enable_drop_resolution>,
         !ref <enable_sign_flip>,
         !ref <enable_chunk_swap>]
+
 
 # ----- FEATURE AUGMENTATION ----- #
 
@@ -380,111 +376,130 @@ fea_augment: !new:speechbrain.augment.augmenter.Augmenter
         !ref <freq_shift>,
         !ref <time_drop>,
         !ref <freq_drop>,
-        !ref <time_warp>,
-        !ref <freq_warp>]
+        !ref <time_warp>]
     enable_augmentations: [
         !ref <enable_time_shift>,
         !ref <enable_freq_shift>,
         !ref <enable_time_drop>,
         !ref <enable_freq_drop>,
-        !ref <enable_time_warp>,
-        !ref <enable_freq_warp>]
+        !ref <enable_time_warp>]
 
-############################## models ################################
 
-enc: !new:speechbrain.nnet.containers.Sequential
-    input_shape: [null, null, !ref <wav2vec_output_dim>]
-    linear1: !name:speechbrain.nnet.linear.Linear
-        n_neurons: !ref <dnn_neurons>
-        bias: True
-    bn1: !name:speechbrain.nnet.normalization.BatchNorm1d
-    activation: !new:torch.nn.LeakyReLU
-    drop: !new:torch.nn.Dropout
-        p: !ref <dropout>
-    linear2: !name:speechbrain.nnet.linear.Linear
-        n_neurons: !ref <dnn_neurons>
-        bias: True
-    bn2: !name:speechbrain.nnet.normalization.BatchNorm1d
-    activation2: !new:torch.nn.LeakyReLU
-    drop2: !new:torch.nn.Dropout
-        p: !ref <dropout>
-    linear3: !name:speechbrain.nnet.linear.Linear
-        n_neurons: !ref <dnn_neurons>
-        bias: True
-    bn3: !name:speechbrain.nnet.normalization.BatchNorm1d
-    activation3: !new:torch.nn.LeakyReLU
+enc: !new:speechbrain.lobes.models.CRDNN.CRDNN
+    input_shape: [null, null, !ref <n_mels>]
+    activation: !ref <activation>
+    dropout: !ref <dropout>
+    cnn_blocks: !ref <cnn_blocks>
+    cnn_channels: !ref <cnn_channels>
+    cnn_kernelsize: !ref <cnn_kernelsize>
+    time_pooling: True
+    rnn_layers: !ref <rnn_layers>
+    rnn_neurons: !ref <rnn_neurons>
+    rnn_bidirectional: !ref <rnn_bidirectional>
+    dnn_blocks: !ref <dnn_blocks>
+    dnn_neurons: !ref <dnn_neurons>
 
-wav2vec2: !new:speechbrain.lobes.models.huggingface_transformers.wav2vec2.Wav2Vec2
-    source: !ref <wav2vec2_hub>
-    output_norm: True
-    freeze: !ref <freeze_wav2vec>
-    freeze_feature_extractor: !ref <freeze_feature_extractor>
-    save_path: !ref <wav2vec2_folder>
+jit_module_keys: [enc]
 
-#####
-# Uncomment this block if you prefer to use a Fairseq pretrained model instead
-# of a HuggingFace one. Here, we provide an URL that is obtained from the
-# Fairseq github for the multilingual XLSR.
-#
-#wav2vec2_url: https://dl.fbaipublicfiles.com/fairseq/wav2vec/xlsr_53_56k.pt
-#wav2vec2: !new:speechbrain.lobes.models.fairseq_wav2vec.FairseqWav2Vec2
-#    pretrained_path: !ref <wav2vec2_url>
-#    output_norm: True
-#    freeze: False
-#    save_path: !ref <save_folder>/wav2vec2_checkpoint/model.pt
-#####
-
-ctc_lin: !new:speechbrain.nnet.linear.Linear
+enc_lin: !new:speechbrain.nnet.linear.Linear
     input_size: !ref <dnn_neurons>
-    n_neurons: !ref <output_neurons>
+    n_neurons: !ref <joint_dim>
+    bias: False
 
-log_softmax: !new:speechbrain.nnet.activations.Softmax
-    apply_log: True
+emb: !new:speechbrain.nnet.embedding.Embedding
+    num_embeddings: !ref <output_neurons>
+    consider_as_one_hot: True
+    blank_id: !ref <blank_index>
 
-ctc_cost: !name:speechbrain.nnet.losses.ctc_loss
+dec: !new:speechbrain.nnet.RNN.LiGRU
+    input_shape: [null, null, !ref <output_neurons> - 1]
+    hidden_size: !ref <dec_neurons>
+    num_layers: 1
+    dropout: 0.0
+    normalization: layernorm
+    bidirectional: False
+
+dec_lin: !new:speechbrain.nnet.linear.Linear
+    input_size: !ref <dec_neurons>
+    n_neurons: !ref <joint_dim>
+    bias: False
+
+Tjoint: !new:speechbrain.nnet.transducer.transducer_joint.Transducer_joint
+    joint: sum # joint [sum | concat]
+    nonlinearity: !ref <activation>
+
+output: !new:speechbrain.nnet.linear.Linear
+    input_size: 128
+    n_neurons: !ref <output_neurons>  # 42 phonemes + 1 blank
+    bias: False
+
+compute_cost: !name:speechbrain.nnet.losses.transducer_loss
+    use_torchaudio: True
     blank_index: !ref <blank_index>
 
-modules:
-    wav2vec2: !ref <wav2vec2>
-    enc: !ref <enc>
-    ctc_lin: !ref <ctc_lin>
+model: !new:torch.nn.ModuleList [[
+    !ref <enc>,
+    !ref <enc_lin>,
+    !ref <emb>,
+    !ref <dec>,
+    !ref <dec_lin>,
+    !ref <output>
+]]
 
-model: !new:torch.nn.ModuleList
-    - [!ref <enc>, !ref <ctc_lin>]
+Greedysearcher: !new:speechbrain.decoders.transducer.TransducerBeamSearcher
+    decode_network_lst: [!ref <emb>, !ref <dec>, !ref <dec_lin>]
+    tjoint: !ref <Tjoint>
+    classifier_network: [!ref <output>]
+    blank_id: !ref <blank_index>
+    beam_size: 1
+    nbest: 1
 
-model_opt_class: !name:torch.optim.Adadelta
-    lr: !ref <lr>
+Beamsearcher: !new:speechbrain.decoders.transducer.TransducerBeamSearcher
+    decode_network_lst: [!ref <emb>, !ref <dec>, !ref <dec_lin>]
+    tjoint: !ref <Tjoint>
+    classifier_network: [!ref <output>]
+    blank_id: !ref <blank_index>
+    beam_size: !ref <beam_size>
+    nbest: !ref <nbest>
+    state_beam: !ref <state_beam>
+    expand_beam: !ref <expand_beam>
+
+opt_class: !name:torch.optim.Adadelta
     rho: 0.95
     eps: 1.e-8
+    lr: !ref <lr>
 
-wav2vec_opt_class: !name:torch.optim.Adam
-    lr: !ref <lr_wav2vec>
-
-lr_annealing_model: !new:speechbrain.nnet.schedulers.NewBobScheduler
+lr_annealing: !new:speechbrain.nnet.schedulers.NewBobScheduler
     initial_value: !ref <lr>
     improvement_threshold: 0.0025
     annealing_factor: 0.8
     patient: 0
 
-lr_annealing_wav2vec: !new:speechbrain.nnet.schedulers.NewBobScheduler
-    initial_value: !ref <lr_wav2vec>
-    improvement_threshold: 0.0025
-    annealing_factor: 0.9
-    patient: 0
+modules:
+    enc: !ref <enc>
+    enc_lin: !ref <enc_lin>
+    emb: !ref <emb>
+    dec: !ref <dec>
+    dec_lin: !ref <dec_lin>
+    Tjoint: !ref <Tjoint>
+    output: !ref <output>
+    normalize: !ref <normalize>
 
 checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
     checkpoints_dir: !ref <save_folder>
     recoverables:
-        wav2vec2: !ref <wav2vec2>
         model: !ref <model>
-        scheduler_model: !ref <lr_annealing_model>
-        scheduler_wav2vec: !ref <lr_annealing_wav2vec>
+        scheduler: !ref <lr_annealing>
+        normalizer: !ref <normalize>
         counter: !ref <epoch_counter>
 
 train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
     save_file: !ref <train_log>
 
-error_rate_computer: !name:speechbrain.utils.metric_stats.ErrorRateStats
+transducer_stats: !name:speechbrain.utils.metric_stats.MetricStats
+    metric: !name:speechbrain.nnet.losses.transducer_loss
+        use_torchaudio: True
+        blank_index: !ref <blank_index>
+        reduction: none
 
-cer_computer: !name:speechbrain.utils.metric_stats.ErrorRateStats
-    split_tokens: True
+per_stats: !name:speechbrain.utils.metric_stats.ErrorRateStats

@@ -8,10 +8,18 @@
 seed: 1236
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <seed>]
 input_type:  noisy_wav
-output_folder: !ref /home/gfdb/scratch/results/<input_type>/augmentation/specaugment/<seed>
+output_folder: !ref /home/gfdb/scratch/results/<input_type>/weighted_uni_aug/<seed>
+data_folder_noise: !ref <data_folder>/noise # The noisy sequencies for data augmentation will automatically be downloaded here.
+data_folder_rir: !ref <data_folder>/rir # The impulse responses used for data augmentation will automatically be downloaded here.
 per_file: !ref <output_folder>/per.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
+noise_annotation: ../noise.csv
+rir_annotation: !ref <data_folder>/rir.csv
+
+# Data for augmentation
+NOISE_DATASET_URL: https://www.dropbox.com/scl/fi/a09pj97s5ifan81dqhi4n/noises.zip?rlkey=j8b0n9kdjdr32o1f06t0cw5b7&dl=1
+RIR_DATASET_URL: https://www.dropbox.com/scl/fi/linhy77c36mu10965a836/RIRs.zip?rlkey=pg9cu8vrpn2u173vhiqyu743u&dl=1
 
 # Data files
 data_folder: !PLACEHOLDER  # e.g. /path/to/Voicebank
@@ -19,6 +27,15 @@ train_annotation: !ref <output_folder>/train.json
 valid_annotation: !ref <output_folder>/valid.json
 test_annotation: !ref <output_folder>/test.json
 skip_prep: False # Skip data preparation
+
+# # Waveform Augmenter (combining augmentations)
+time_parallel_augment: False  # Apply augmentations in parallel if True, or sequentially if False
+time_concat_original: True  # Concatenate original signals to the training batch if True
+time_repeat_augment: 1  # Number of times to apply augmentation
+time_shuffle_augmentations: False  # Shuffle order of augmentations if True, else use specified order
+time_min_augmentations: 1  # Min number of augmentations to apply
+time_max_augmentations: 1  # Max number of augmentations to apply
+time_augment_prob: 1.0     # Probability to apply time augmentation
 
 # Training parameters
 number_of_epochs: 50
@@ -88,52 +105,35 @@ compute_features: !new:speechbrain.lobes.features.Fbank
 normalize: !new:speechbrain.processing.features.InputNormalization
     norm_type: global
 
-# Speed perturbation
-speed_changes: [95, 100, 105]  # List of speed changes for time-stretching
+# Download and prepare the dataset of noisy sequences for augmentation
+prepare_noise_data: !name:speechbrain.augment.preparation.prepare_dataset_from_URL
+    URL: !ref <NOISE_DATASET_URL>
+    dest_folder: !ref <data_folder_noise>
+    ext: wav
+    csv_file: !ref <noise_annotation>
 
-speed_perturb: !new:speechbrain.augment.time_domain.SpeedPerturb
-    orig_freq: !ref <sample_rate>
-    speeds: !ref <speed_changes>
+# Download and prepare the dataset of room impulse responses for augmentation
+prepare_rir_data: !name:speechbrain.augment.preparation.prepare_dataset_from_URL
+    URL: !ref <RIR_DATASET_URL>
+    dest_folder: !ref <data_folder_rir>
+    ext: wav
+    csv_file: !ref <rir_annotation>
 
-# Frequency drop: randomly drops a number of frequency bands to zero.
-drop_freq_low: 0  # Min frequency band dropout probability
-drop_freq_high: 1  # Max frequency band dropout probability
-drop_freq_count_low: 1  # Min number of frequency bands to drop
-drop_freq_count_high: 3  # Max number of frequency bands to drop
-drop_freq_width: 0.05  # Width of frequency bands to drop
+# ----- WAVEFORM AUGMENTATION ----- #
 
-drop_freq: !new:speechbrain.augment.time_domain.DropFreq
-    drop_freq_low: !ref <drop_freq_low>
-    drop_freq_high: !ref <drop_freq_high>
-    drop_freq_count_low: !ref <drop_freq_count_low>
-    drop_freq_count_high: !ref <drop_freq_count_high>
-    drop_freq_width: !ref <drop_freq_width>
-
-# Time drop: randomly drops a number of temporal chunks.
-drop_chunk_count_low: 1  # Min number of audio chunks to drop
-drop_chunk_count_high: 5  # Max number of audio chunks to drop
-drop_chunk_length_low: 1000  # Min length of audio chunks to drop
-drop_chunk_length_high: 2000  # Max length of audio chunks to drop
-
-drop_chunk: !new:speechbrain.augment.time_domain.DropChunk
-    drop_length_low: !ref <drop_chunk_length_low>
-    drop_length_high: !ref <drop_chunk_length_high>
-    drop_count_low: !ref <drop_chunk_count_low>
-    drop_count_high: !ref <drop_chunk_count_high>
+uni_aug: !new:speechbrain.augment.time_domain.UniversalAugment
 
 # Augmenter: Combines previously defined augmentations to perform data augmentation
 wav_augment: !new:speechbrain.augment.augmenter.Augmenter
-    parallel_augment: False
-    concat_original: False
-    repeat_augment: 1
-    shuffle_augmentations: False
-    min_augmentations: 3
-    max_augmentations: 3
-    augment_prob: 1.0
-    augmentations: [
-        !ref <speed_perturb>,
-        !ref <drop_freq>,
-        !ref <drop_chunk>]
+    parallel_augment: !ref <time_parallel_augment>
+    concat_original: !ref <time_concat_original>
+    repeat_augment: !ref <time_repeat_augment>
+    shuffle_augmentations: !ref <time_shuffle_augmentations>
+    min_augmentations: !ref <time_min_augmentations>
+    max_augmentations: !ref <time_max_augmentations>
+    augment_prob: !ref <time_augment_prob>
+    augmentations: [!ref <uni_aug>]
+    enable_augmentations: [True]
 
 
 enc: !new:speechbrain.lobes.models.CRDNN.CRDNN
