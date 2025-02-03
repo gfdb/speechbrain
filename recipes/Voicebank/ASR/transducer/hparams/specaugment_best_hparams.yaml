@@ -130,7 +130,7 @@ time_warp: !new:speechbrain.augment.freq_domain.Warping
 # Augmenter: Combines previously defined augmentations to perform data augmentation
 fea_augment: !new:speechbrain.augment.augmenter.Augmenter
     parallel_augment: False
-    concat_original: False
+    concat_original: True
     repeat_augment: 1
     shuffle_augmentations: False
     min_augmentations: 3
