@@ -68,7 +68,7 @@ class ASR(sb.core.Brain):
 
         # Add feature augmentation if specified.
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
-            feats, fea_lens = self.hparams.fea_augment(feats, wav_lens)
+            feats, wav_lens = self.hparams.fea_augment(feats, wav_lens)
             tokens_bos = self.hparams.fea_augment.replicate_labels(tokens_bos)
 
         # forward modules
@@ -121,26 +121,21 @@ class ASR(sb.core.Brain):
         tokens, tokens_lens = batch.tokens
 
         if stage == sb.Stage.TRAIN:
+            augment_type = None
             if hasattr(self.hparams, "wav_augment"):
-                tokens = self.hparams.wav_augment.replicate_labels(tokens)
-                tokens_lens = self.hparams.wav_augment.replicate_labels(
-                    tokens_lens
-                )
-                tokens_eos = self.hparams.wav_augment.replicate_labels(
-                    tokens_eos
-                )
-                tokens_eos_lens = self.hparams.wav_augment.replicate_labels(
-                    tokens_eos_lens
-                )
+                augment_type = "wav_augment"
             if hasattr(self.hparams, "fea_augment"):
-                tokens = self.hparams.fea_augment.replicate_labels(tokens)
-                tokens_lens = self.hparams.fea_augment.replicate_labels(
+                augment_type = "fea_augment"
+            
+            if augment_type is not None:
+                tokens = self.hparams[augment_type].replicate_labels(tokens)
+                tokens_lens = self.hparams[augment_type].replicate_labels(
                     tokens_lens
                 )
-                tokens_eos = self.hparams.fea_augment.replicate_labels(
+                tokens_eos = self.hparams[augment_type].replicate_labels(
                     tokens_eos
                 )
-                tokens_eos_lens = self.hparams.fea_augment.replicate_labels(
+                tokens_eos_lens = self.hparams[augment_type].replicate_labels(
                     tokens_eos_lens
                 )
         
