@@ -592,7 +592,10 @@ class Augmenter(torch.nn.Module):
             augmented_labels = (
                 augmented_labels + [block_labels]
             )
-                
+        else:
+            augmented_labels = (
+                augmented_labels + [selected_labels] * self.repeat_augment
+            )
 
         augmented_labels = torch.cat(augmented_labels, dim=0)
 

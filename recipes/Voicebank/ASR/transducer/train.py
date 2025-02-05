@@ -37,7 +37,7 @@ class ASR_Brain(sb.Brain):
         # Model computations
         feats = self.hparams.compute_features(wavs)
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
-            feats, wav_lens = self.hparams.fea_augment(feats, wav_lens)
+            feats, fea_lens = self.hparams.fea_augment(feats, wav_lens)
             phns = self.hparams.fea_augment.replicate_labels(phns)
         
         feats = self.modules.normalize(feats, wav_lens)
