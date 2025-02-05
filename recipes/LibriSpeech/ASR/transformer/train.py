@@ -128,14 +128,15 @@ class ASR(sb.core.Brain):
                 augment_type = "fea_augment"
             
             if augment_type is not None:
-                tokens = self.hparams[augment_type].replicate_labels(tokens)
-                tokens_lens = self.hparams[augment_type].replicate_labels(
+                augment_obj = getattr(self.hparams, augment_type)
+                tokens = augment_obj.replicate_labels(tokens)
+                tokens_lens = augment_obj.replicate_labels(
                     tokens_lens
                 )
-                tokens_eos = self.hparams[augment_type].replicate_labels(
+                tokens_eos = augment_obj.replicate_labels(
                     tokens_eos
                 )
-                tokens_eos_lens = self.hparams[augment_type].replicate_labels(
+                tokens_eos_lens = augment_obj.replicate_labels(
                     tokens_eos_lens
                 )
         
