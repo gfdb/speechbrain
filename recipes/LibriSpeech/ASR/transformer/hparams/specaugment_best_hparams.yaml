@@ -322,9 +322,10 @@ time_warp: !new:speechbrain.augment.freq_domain.Warping
     warp_mode: !ref <time_warp_mode>
     dim: 1
 
+concat_original: True
 fea_augment: !new:speechbrain.augment.augmenter.Augmenter
     parallel_augment: False
-    concat_original: True
+    concat_original: !ref <concat_original>
     repeat_augment: 1
     shuffle_augmentations: False
     min_augmentations: 3
