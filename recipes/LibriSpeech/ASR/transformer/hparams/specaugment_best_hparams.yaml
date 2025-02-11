@@ -323,7 +323,7 @@ time_warp: !new:speechbrain.augment.freq_domain.Warping
     dim: 1
 
 concat_original: True
-fea_augment: !new:speechbrain.augment.augmenter.Augmenter
+fea_augment: !new:speechbrain.augment.augmenter_old.Augmenter
     parallel_augment: False
     concat_original: !ref <concat_original>
     repeat_augment: 1
