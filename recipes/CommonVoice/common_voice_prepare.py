@@ -223,20 +223,22 @@ def process_line(line, convert_to_wav, data_folder, language, accented_letters):
     audio_path = data_folder + "/clips/" + line.split("\t")[1]
 
     if convert_to_wav:
-        audio_path = convert_mp3_to_wav(audio_path)
+        # audio_path = convert_mp3_to_wav(audio_path)
+        pass
 
     file_name = audio_path.split(".")[-2].split("/")[-1]
     spk_id = line.split("\t")[0]
     snt_id = file_name
 
     if convert_mp3_to_wav:
-        audio_path = convert_mp3_to_wav(audio_path)
+        # audio_path = convert_mp3_to_wav(audio_path)
+        pass
 
     # Reading the signal (to retrieve duration in seconds)
     if os.path.isfile(audio_path):
         info = read_audio_info(audio_path)
     else:
-        msg = "\tError loading: %s" % (str(len(file_name)))
+        msg = "\tError loading: %s" % audio_path
         logger.info(msg)
         return None
 
