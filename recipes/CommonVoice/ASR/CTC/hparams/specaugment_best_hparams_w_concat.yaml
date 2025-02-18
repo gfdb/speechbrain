@@ -139,9 +139,9 @@ wav_augment: !new:speechbrain.augment.augmenter.Augmenter
     concat_end_index: !ref <batch_size> # This leaves unchanges original inputs
     augment_prob: 1.0
     augmentations: [
-        !ref <time_drop>,
-        !ref <freq_drop>,
-        !ref <time_warp>]
+        !ref <speed_perturb>,
+        !ref <drop_freq>,
+        !ref <drop_chunk>]
 
 enc: !new:speechbrain.nnet.containers.Sequential
     input_shape: [null, null, !ref <wav2vec_output_dim>]
