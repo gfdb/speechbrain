@@ -130,11 +130,13 @@ time_warp: !new:speechbrain.augment.freq_domain.Warping
 # Augmenter: Combines previously defined augmentations to perform data augmentation
 fea_augment: !new:speechbrain.augment.augmenter.Augmenter
     parallel_augment: False
-    concat_original: False
+    concat_original: True
     repeat_augment: 1
     shuffle_augmentations: False
     min_augmentations: 3
     max_augmentations: 3
+    augment_start_index: !ref <batch_size> # This leaves unchanges original inputs
+    concat_end_index: !ref <batch_size> # This leaves unchanges original inputs
     augment_prob: 1.0
     augmentations: [
         !ref <time_drop>,
