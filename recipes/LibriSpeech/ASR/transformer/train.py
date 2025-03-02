@@ -58,8 +58,9 @@ class ASR(sb.core.Brain):
 
         # Add waveform augmentation if specified.
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
-            wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
-            tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
+            if hasattr(self.hparams, 'augment_device') and self.hparams.augment_device == "cuda":
+                wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
+                tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
 
         # compute features
         feats = self.hparams.compute_features(wavs)
@@ -321,14 +322,11 @@ def dataio_prepare(hparams):
     @sb.utils.data_pipeline.takes("wav")
     @sb.utils.data_pipeline.provides("sig")
     def audio_pipeline_train(wav):
-        # Speed Perturb is done here so it is multi-threaded with the
-        # workers of the dataloader (faster).
-        if "speed_perturb" in hparams:
-            sig = sb.dataio.dataio.read_audio(wav)
+        sig = sb.dataio.dataio.read_audio(wav)
 
-            sig = hparams["speed_perturb"](sig.unsqueeze(0)).squeeze(0)
-        else:
-            sig = sb.dataio.dataio.read_audio(wav)
+        if hparams["augment_device"] == "cpu":
+            sig  = hparams["wav_augment"](sig.unsqueeze(0))
+
         return sig
 
     sb.dataio.dataset.add_dynamic_item([train_data], audio_pipeline_train)
@@ -343,6 +341,8 @@ def dataio_prepare(hparams):
         tokens_list = tokenizer.encode_as_ids(wrd)
         yield tokens_list
         tokens_bos = torch.LongTensor([hparams["bos_index"]] + (tokens_list))
+        if hparams["augment_device"] == "cpu":
+            tokens_bos = hparams["wav_augment"].replicate_labels(tokens_bos)
         yield tokens_bos
         tokens_eos = torch.LongTensor(tokens_list + [hparams["eos_index"]])
         yield tokens_eos
