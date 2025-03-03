@@ -325,7 +325,10 @@ def dataio_prepare(hparams):
         sig = sb.dataio.dataio.read_audio(wav)
 
         if hparams["augment_device"] == "cpu":
-            sig  = hparams["wav_augment"](sig.unsqueeze(0))
+            # 3/4 chance to augment the signal
+            # this mimics concat_original behavior
+            if torch.randn((1,)).item() > 0.25:
+                sig, _  = hparams["cpu_augment"](sig.unsqueeze(0), torch.tensor([sig.shape[0]]))
 
         return sig
 

@@ -137,6 +137,11 @@ class NewAugmenter(nn.Module):
             if lengths is not None:
                 length_copies.append(lengths)
         
+        # if there is a single batch copy
+        # just return it as all the lengths will be the same
+        if len(batch_copies) == 1:
+            return batch_copies[0], length_copies[0]
+        
         return self.concatenate_outputs(batch_copies, length_copies)
 
     def replicate_labels(self, labels, deep_copy=False):
