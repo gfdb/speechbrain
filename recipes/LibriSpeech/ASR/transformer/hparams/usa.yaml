@@ -314,6 +314,7 @@ num_aug: 3
 batch_multiplier: 3
 concat_original: True
 aug_strategy: 'random'
+augment_device: 'cuda'
  
 wav_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     augmentations: [
