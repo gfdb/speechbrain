@@ -105,7 +105,6 @@ class NewAugmenter(nn.Module):
                 for idx_tensor, aug_idx_tensor in zip(indices_to_augment, random_aug_indices):
                     idx = idx_tensor.item()
                     aug_idx = aug_idx_tensor.item()
-                    self.cntr += 1
                     augmentation_fn = self.augmentations[aug_idx]
                     if self.require_lengths[aug_idx] and lengths is not None:
                         result = augmentation_fn(batch_copies[idx], lengths=length_copies[idx])
