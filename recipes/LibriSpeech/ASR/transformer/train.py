@@ -329,7 +329,7 @@ def dataio_prepare(hparams):
             # this mimics concat_original behavior
             if torch.randn((1,)).item() > 0.25:
                 sig, _  = hparams["cpu_augment"](sig.unsqueeze(0), torch.tensor([sig.shape[0]]))
-
+                sig = sig.squeeze(0)
         return sig
 
     sb.dataio.dataset.add_dynamic_item([train_data], audio_pipeline_train)

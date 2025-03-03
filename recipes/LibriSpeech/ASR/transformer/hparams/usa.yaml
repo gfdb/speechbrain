@@ -144,7 +144,7 @@ grad_accumulation_factor: 1
 max_grad_norm: 5.0
 loss_reduction: 'batchmean'
 sorting: random
-num_workers: 1 
+num_workers: 4 
 precision: fp32 # bf16, fp16 or fp32
 avg_checkpoints: 10 # Number of checkpoints to average for evaluation
 
@@ -256,7 +256,7 @@ add_noise: !new:speechbrain.augment.time_domain.AddNoise
     snr_high: !ref <snr_high>
     noise_sample_rate: !ref <sample_rate>
     clean_sample_rate: !ref <sample_rate>
-    num_workers: !ref <num_workers>
+    num_workers: 0
 
 # Speed perturbation
 speed_perturb: !new:speechbrain.augment.time_domain.SpeedPerturb
