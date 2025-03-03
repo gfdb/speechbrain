@@ -57,10 +57,11 @@ class ASR(sb.core.Brain):
         tokens_bos, _ = batch.tokens_bos
 
         # Add waveform augmentation if specified.
-        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
-            if hasattr(self.hparams, 'augment_device') and self.hparams.augment_device == "cuda":
-                wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
-                tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment") and (
+            not hasattr(self.hparams, "augment_device") or self.hparams.augment_device == "cuda"
+        ):
+            wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
+            tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
 
         # compute features
         feats = self.hparams.compute_features(wavs)
@@ -128,7 +129,9 @@ class ASR(sb.core.Brain):
             if hasattr(self.hparams, "fea_augment"):
                 augment_type = "fea_augment"
             
-            if augment_type is not None:
+            if augment_type is not None and (
+                not hasattr(self.hparams, "augment_device") or self.hparams.augment_device == "cuda"
+            ):
                 augment_obj = getattr(self.hparams, augment_type)
                 tokens = augment_obj.replicate_labels(tokens)
                 tokens_lens = augment_obj.replicate_labels(
