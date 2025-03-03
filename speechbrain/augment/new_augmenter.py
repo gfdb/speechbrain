@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import inspect
 from speechbrain.utils.callchains import lengths_arg_exists
+import torch.nn.functional as F
+
 
 class NewAugmenter(nn.Module):
     """A memory-efficient faster implementation for batch augmentation.
@@ -35,8 +37,6 @@ class NewAugmenter(nn.Module):
         self.augmentations = augmentations
         self.concat_original = concat_original
         self.aug_strategy = aug_strategy.lower()
-
-        self.cntr = 0
             
 
         # check which augmentation functions require lengths argument
@@ -169,41 +169,58 @@ class NewAugmenter(nn.Module):
             )
         return out
 
-    def concatenate_outputs(self, augment_lst, augment_len_lst):
 
-        # determine the maximum temporal length among all augmentations.
+    def concatenate_outputs(self, augment_lst, augment_len_lst):
+        """
+        Concatenate a list of augmented signals, accounting for varying temporal lengths.
+        Padding is applied to ensure all signals can be concatenated.
+
+        Arguments
+        ---------
+        augment_lst : List of torch.Tensor
+            List of augmented signals to be concatenated.
+        augment_len_lst : List of torch.Tensor
+            List of lengths corresponding to the augmented signals.
+
+        Returns
+        -------
+        concatenated_signals : torch.Tensor
+            A tensor containing the concatenated signals.
+        concatenated_lengths : torch.Tensor
+            A tensor containing the concatenated signal lengths.
+
+        Notes
+        -----
+        This function takes a list of augmented signals, which may have different temporal
+        lengths due to variations such as speed changes. It pads the signals to match the
+        maximum temporal dimension found among the input signals and rescales the lengths
+        accordingly before concatenating them.
+        """
+        # Find the maximum temporal dimension (batch length) among the sequences
         max_len = max(augment.shape[1] for augment in augment_lst)
-        device = augment_lst[0].device
 
         # if all augmentations already have the maximum length, concatenate directly
         # without adding padding
-        if all(augment.shape[1] == max_len for augment in augment_lst) or not augment_len_lst:
+        if all(augment.shape[1] == max_len for augment in augment_lst):
             output = torch.cat(augment_lst, dim=0)
-            return output, torch.tensor([])
+            lens = torch.cat(augment_len_lst, dim=0)
+            return output, lens
 
-        # stack the augmented lengths (each is [batch]) -> shape becomes (n, batch)
-        stacked_lengths = torch.stack(augment_len_lst, dim=0).float().to(device)
-        
-        # get current temporal lengths for each augmentation (shape: [n])
-        current_lengths = torch.tensor(
-            [augment.shape[1] for augment in augment_lst],
-            dtype=torch.float, device=device
-        )
-        ratios = current_lengths / max_len
-        
-        # multiply each row in stacked_lengths by its corresponding ratio
-        rescaled_lengths = stacked_lengths * ratios.unsqueeze(1)
-        final_lengths = rescaled_lengths.view(-1)
-    
-        # preallocate a padded tensor
-        n = len(augment_lst)
-        batch_size = augment_lst[0].shape[0]
-        padded_tensor = torch.zeros((n, batch_size, max_len), device=device,
-                                    dtype=augment_lst[0].dtype)
-        
-        for i, augment in enumerate(augment_lst):
-            cur_len = augment.shape[1]
-            padded_tensor[i, :, :cur_len] = augment
+        # Rescale the sequence lengths to adjust for augmented batches with different temporal dimensions.
+        augment_len_lst = [
+            length * (output.shape[1] / max_len)
+            for length, output in zip(augment_len_lst, augment_lst)
+        ]
 
-        output = padded_tensor.view(-1, max_len)
-        return output, final_lengths
+        # Pad sequences to match the maximum temporal dimension.
+        # Note that some augmented batches, like those with speed changes, may have different temporal dimensions.
+        augment_lst = [
+            F.pad(output, (0, max_len - output.shape[1]))
+            for output in augment_lst
+        ]
+
+        # Concatenate the padded sequences and rescaled lengths
+        output = torch.cat(augment_lst, dim=0)
+        output_lengths = torch.cat(augment_len_lst, dim=0)
+
+        return output, output_lengths
