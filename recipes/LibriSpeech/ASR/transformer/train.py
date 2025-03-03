@@ -324,10 +324,12 @@ def dataio_prepare(hparams):
     def audio_pipeline_train(wav):
         sig = sb.dataio.dataio.read_audio(wav)
 
-        if hparams["augment_device"] == "cpu":
-            # 3/4 chance to augment the signal
-            # this mimics concat_original behavior
-            if torch.randn((1,)).item() > 0.25:
+        if "augment_device" in hparams and hparams["augment_device"] == "cpu":
+            # probability the signal should not be augmented
+            clean_prob = int(hparams["concat_original"]) / (int(hparams["concat_original"]) + hparams["batch_multiplier"])
+            
+            # this mimics concat_original behavior for cpu augmentation
+            if torch.randn((1,)).item() > clean_prob:
                 sig, _  = hparams["cpu_augment"](sig.unsqueeze(0), torch.tensor([sig.shape[0]]))
                 sig = sig.squeeze(0)
         return sig
@@ -344,8 +346,6 @@ def dataio_prepare(hparams):
         tokens_list = tokenizer.encode_as_ids(wrd)
         yield tokens_list
         tokens_bos = torch.LongTensor([hparams["bos_index"]] + (tokens_list))
-        if hparams["augment_device"] == "cpu":
-            tokens_bos = hparams["wav_augment"].replicate_labels(tokens_bos)
         yield tokens_bos
         tokens_eos = torch.LongTensor(tokens_list + [hparams["eos_index"]])
         yield tokens_eos
