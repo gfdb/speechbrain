@@ -333,6 +333,25 @@ wav_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     concat_original: !ref <concat_original>
     aug_strategy: !ref <aug_strategy>
 
+
+cpu_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
+    augmentations: [
+        !ref <add_noise>,
+        !ref <speed_perturb>,
+        !ref <drop_freq>,
+        !ref <drop_chunk>,
+        !ref <clipping>,
+        !ref <rand_amp>,
+        !ref <sign_flip>,
+        !ref <chunk_swap>,
+        !ref <babble_noise>
+    ]
+    min_num_aug: !ref <min_num_aug>
+    num_aug: !ref <num_aug>
+    batch_multiplier: 1
+    concat_original: False
+    aug_strategy: !ref <aug_strategy>
+
 ############################## models ################################
 
 CNN: !new:speechbrain.lobes.models.convolution.ConvolutionFrontEnd
