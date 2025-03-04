@@ -169,7 +169,7 @@ class NewAugmenter(nn.Module):
             expanded = labels.unsqueeze(1).expand(-1, num_repl, -1)
 
             # reshape but in non-contiguous blocks
-            out = expanded.reshape(-1, ([1] * labels.shape[1:]))
+            out = expanded.reshape(-1, *labels.shape[1:])
 
             batch_size = labels.shape[0]
 
