@@ -166,11 +166,20 @@ class NewAugmenter(nn.Module):
         if deep_copy:
             out = torch.cat([labels.clone() for _ in range(num_repl)], dim=0)
         else:
-            out = (
-                labels.unsqueeze(1)
-                    .expand(-1, num_repl, *([-1] * len(non_batch_dims)))
-                    .reshape(-1, *non_batch_dims)
-            )
+            expanded = labels.unsqueeze(1).expand(-1, num_repl, -1)
+
+            # reshape but in non-contiguous blocks
+            out = expanded.reshape(-1, ([1] * labels.shape[1:]))
+
+            batch_size = labels.shape[0]
+
+            # expanding copied the labels, however it did it sequentially
+            # i.e. element of batch 1 is copied num_repl times at pos 0,1,2,...
+            # we need to reorder to line up the labels correctly
+            indices = torch.arange(batch_size * num_repl).reshape(num_repl, batch_size).T.reshape(-1)
+
+            # make contiguous to optimize training speed
+            out = out[indices].contiguous()
         return out
 
 
