@@ -157,27 +157,26 @@ class NewAugmenter(nn.Module):
         Returns:
             torch.Tensor: The labels for the augmented data.
         """
+        batch_size = labels.shape[0]
         non_batch_dims = labels.shape[1:]
         num_repl = self.batch_multiplier + int(self.concat_original)
-
+        
         if num_repl == 1:
             return labels
 
         if deep_copy:
             out = torch.cat([labels.clone() for _ in range(num_repl)], dim=0)
         else:
-            expanded = labels.unsqueeze(1).expand(-1, num_repl, -1)
+            expanded = labels.unsqueeze(1).expand(batch_size, num_repl, *non_batch_dims)
 
             # reshape but in non-contiguous blocks
-            out = expanded.reshape(-1, *labels.shape[1:])
-
-            batch_size = labels.shape[0]
+            out = expanded.reshape(batch_size * num_repl, *non_batch_dims)
 
             # expanding copied the labels, however it did it sequentially
             # i.e. element of batch 1 is copied num_repl times at pos 0,1,2,...
             # we need to reorder to line up the labels correctly
-            indices = torch.arange(batch_size * num_repl).reshape(num_repl, batch_size).T.reshape(-1)
-
+            indices = torch.arange(batch_size * num_repl).reshape(batch_size, num_repl).transpose(0, 1).reshape(-1)
+            
             # make contiguous to optimize training speed
             out = out[indices].contiguous()
         return out
