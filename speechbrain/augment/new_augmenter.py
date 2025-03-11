@@ -114,6 +114,46 @@ class NewAugmenter(nn.Module):
                             batch_copies[idx] = result
                     else:
                         batch_copies[idx] = augmentation_fn(batch_copies[idx])
+        
+        
+        elif self.aug_strategy == "classic":
+            # Sample number of augmentations to apply
+            sampled_num_aug = torch.randint(
+                low=self.min_num_aug,
+                high=self.num_aug + 1,
+                size=(1,),
+                device=device
+            ).item()
+
+            # Pre-sample augmentation indices efficiently
+            first_aug_idx = torch.randint(len(self.augmentations), (1,), device=device).item()
+            chosen_aug = self.augmentations[first_aug_idx]
+
+            # first augmentation applied uniformly to all batch copies
+            for i in range(self.batch_multiplier):
+                if lengths is not None and self.require_lengths[first_aug_idx]:
+                    batch_copies[i], length_copies[i] = chosen_aug(batch_copies[i], lengths=length_copies[i])
+                else:
+                    batch_copies[i] = chosen_aug(batch_copies[i])
+
+            # pre-sample remaining augmentations
+            if sampled_num_aug > 1:
+                additional_aug_indices = torch.randint(
+                    low=0,
+                    high=len(self.augmentations),
+                    size=(sampled_num_aug - 1, self.batch_multiplier),
+                    device=device
+                )
+
+                # additional augmentation rounds apply random augmentations independently
+                for aug_round in range(sampled_num_aug - 1):
+                    for i in range(self.batch_multiplier):
+                        random_aug_idx = additional_aug_indices[aug_round, i].item()
+                        random_aug = self.augmentations[random_aug_idx]
+                        if lengths is not None and self.require_lengths[random_aug_idx]:
+                            batch_copies[i], length_copies[i] = random_aug(batch_copies[i], lengths=length_copies[i])
+                        else:
+                            batch_copies[i] = random_aug(batch_copies[i])
 
         elif self.aug_strategy == "all":
             # apply every augmentation sequentially for each batch copy copy
