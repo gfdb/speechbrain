@@ -66,9 +66,9 @@ class NewAugmenter(nn.Module):
         batch_copies = []
         length_copies = []
         for _ in range(self.batch_multiplier):
-            batch_copies.append(x.clone())
+            batch_copies.append(x)
             if lengths is not None:
-                length_copies.append(lengths.clone())
+                length_copies.append(lengths)
 
         if self.aug_strategy == "random":
             # random number of augmentation steps for each batch copy
@@ -141,7 +141,8 @@ class NewAugmenter(nn.Module):
         if len(batch_copies) == 1:
             return batch_copies[0], length_copies[0]
         
-        return self.concatenate_outputs(batch_copies, length_copies)
+        outputs, out_lens = self.concatenate_outputs(batch_copies, length_copies) 
+        return outputs, out_lens 
 
     def replicate_labels(self, labels, deep_copy=False):
         """Replicate labels based on how many copies of the
