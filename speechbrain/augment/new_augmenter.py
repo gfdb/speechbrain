@@ -132,7 +132,12 @@ class NewAugmenter(nn.Module):
             # first augmentation applied uniformly to all batch copies
             for i in range(self.batch_multiplier):
                 if lengths is not None and self.require_lengths[first_aug_idx]:
-                    batch_copies[i], length_copies[i] = chosen_aug(batch_copies[i], lengths=length_copies[i])
+                    
+                    result = chosen_aug(batch_copies[i], lengths=length_copies[i])
+                    if isinstance(result, tuple):
+                        batch_copies[i], length_copies[i] = result
+                    else:
+                        batch_copies[i] = result
                 else:
                     batch_copies[i] = chosen_aug(batch_copies[i])
 
@@ -151,7 +156,11 @@ class NewAugmenter(nn.Module):
                         random_aug_idx = additional_aug_indices[aug_round, i].item()
                         random_aug = self.augmentations[random_aug_idx]
                         if lengths is not None and self.require_lengths[random_aug_idx]:
-                            batch_copies[i], length_copies[i] = random_aug(batch_copies[i], lengths=length_copies[i])
+                            result = random_aug(batch_copies[i], lengths=length_copies[i])
+                            if isinstance(result, tuple):
+                                batch_copies[i], length_copies[i] = result
+                            else:
+                                batch_copies[i] = result
                         else:
                             batch_copies[i] = random_aug(batch_copies[i])
 
