@@ -266,6 +266,7 @@ def dataio_prepare(hparams, tokenizer):
     test_data = test_data.filtered_sorted(sort_key="duration")
 
     datasets = [train_data, valid_data, test_data]
+    valtest_datasets = [valid_data, test_data]
 
     # 2. Define audio pipeline:
     @sb.utils.data_pipeline.takes("wav")
@@ -279,7 +280,27 @@ def dataio_prepare(hparams, tokenizer):
         )(sig)
         return resampled
 
-    sb.dataio.dataset.add_dynamic_item(datasets, audio_pipeline)
+    sb.dataio.dataset.add_dynamic_item(valtest_datasets, audio_pipeline)
+
+    @sb.utils.data_pipeline.takes("wav")
+    @sb.utils.data_pipeline.provides("sig")
+    def audio_pipeline_train(wav):
+        info = torchaudio.info(wav)
+        sig = sb.dataio.dataio.read_audio(wav)
+        sig = torchaudio.transforms.Resample(
+            info.sample_rate,
+            hparams["sample_rate"],
+        )(sig)
+        if "usa_speed" in hparams and hparams["usa_speed"] and "speed_perturb" in hparams:
+            spd_prob = 0.5 # probability to apply speed perturbation 
+            if torch.randn((1,)).item() > spd_prob:
+                sig = hparams["speed_perturb"](sig.unsqueeze(0))
+                sig = sig.squeeze(0)
+        return sig
+
+    sb.dataio.dataset.add_dynamic_item([train_data], audio_pipeline_train)
+
+
 
     # 3. Define text pipeline:
     @sb.utils.data_pipeline.takes("wrd")

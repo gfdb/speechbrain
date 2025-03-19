@@ -37,9 +37,9 @@ class ASR_Brain(sb.Brain):
         # Model computations
         feats = self.hparams.compute_features(wavs) 
         feats = self.modules.normalize(feats, wav_lens)
-
+        
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
-            feats, fea_lens = self.hparams.fea_augment(feats, wav_lens)
+            feats, wav_lens = self.hparams.fea_augment(feats, wav_lens)
             phns = self.hparams.fea_augment.replicate_labels(phns)
         
         x = self.modules.enc(feats)
@@ -157,7 +157,7 @@ def save_metrics_to_file(wer_file, transducer_metrics, per_metrics):
         print(
             "Transducer and PER stats written to file",
             hparams["test_wer_file"],
-        )
+            )
 
 
 def dataio_prep(hparams):
@@ -170,6 +170,18 @@ def dataio_prep(hparams):
     @sb.utils.data_pipeline.provides("sig")
     def audio_pipeline(wav):
         sig = sb.dataio.dataio.read_audio(wav)
+        return sig
+
+    # 1. Define audio pipeline:
+    @sb.utils.data_pipeline.takes(hparams["input_type"])
+    @sb.utils.data_pipeline.provides("sig")
+    def audio_pipeline_train(wav):
+        sig = sb.dataio.dataio.read_audio(wav)
+        if "usa_speed" in hparams and hparams["usa_speed"] and "speed_perturb" in hparams:
+            spd_prob = 0.5 # probability to apply speed perturbation 
+            if torch.randn((1,)).item() > spd_prob:
+                sig = hparams["speed_perturb"](sig.unsqueeze(0))
+                sig = sig.squeeze(0)
         return sig
 
     # 2. Define text pipeline:
@@ -192,9 +204,15 @@ def dataio_prep(hparams):
         data[dataset] = sb.dataio.dataset.DynamicItemDataset.from_json(
             json_path=data_info[dataset],
             replacements={"data_root": hparams["data_folder"]},
-            dynamic_items=[audio_pipeline, text_pipeline],
             output_keys=["id", "sig", "phn_encoded"],
         )
+
+
+    sb.dataio.dataset.add_dynamic_item([data["train"]], audio_pipeline_train)
+    sb.dataio.dataset.add_dynamic_item([data["valid"], data["test"]], audio_pipeline)
+    
+    # Apply text pipeline to all datasets
+    sb.dataio.dataset.add_dynamic_item([data[k] for k in data], text_pipeline)
 
     # Sort train dataset and ensure it doesn't get un-sorted
     if hparams["sorting"] == "ascending" or hparams["sorting"] == "descending":

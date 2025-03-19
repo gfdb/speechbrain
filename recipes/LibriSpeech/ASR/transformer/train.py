@@ -69,10 +69,12 @@ class ASR(sb.core.Brain):
         feats = self.modules.normalize(feats, wav_lens, epoch=current_epoch)
 
         # Add feature augmentation if specified.
-        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
-            feats, fea_lens = self.hparams.fea_augment(feats, wav_lens)
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment") and (
+            not hasattr(self.hparams, "augment_device") or self.hparams.augment_device == "cuda"
+        ):
+            feats, wav_lens = self.hparams.fea_augment(feats, wav_lens)
             tokens_bos = self.hparams.fea_augment.replicate_labels(tokens_bos)
-
+        
         # forward modules
         src = self.modules.CNN(feats)
 
@@ -327,13 +329,10 @@ def dataio_prepare(hparams):
     def audio_pipeline_train(wav):
         sig = sb.dataio.dataio.read_audio(wav)
 
-        if "augment_device" in hparams and hparams["augment_device"] == "cpu":
-            # probability the signal should not be augmented
-            clean_prob = int(hparams["concat_original"]) / (int(hparams["concat_original"]) + hparams["batch_multiplier"])
-            
-            # this mimics concat_original behavior for cpu augmentation
-            if torch.randn((1,)).item() > clean_prob:
-                sig, _  = hparams["cpu_augment"](sig.unsqueeze(0), torch.tensor([sig.shape[0]]))
+        if "usa_speed" in hparams and hparams["usa_speed"] and "speed_perturb" in hparams:
+            spd_prob = 0.5 # probability to apply speed perturbation 
+            if torch.randn((1,)).item() > spd_prob:
+                sig = hparams["speed_perturb"](sig.unsqueeze(0))
                 sig = sig.squeeze(0)
         return sig
 
