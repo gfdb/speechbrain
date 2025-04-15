@@ -1,0 +1,85 @@
+# CIFAR-100 config for SpeechBrain
+
+seed: 1337
+__set_seed: !apply:torch.manual_seed [!ref <seed>]
+
+# Dataset
+output_folder: !ref results/tiny-imagenet-200
+data_folder: /home/gfdb/datasets/tiny-imagenet-200
+train_log: !ref <output_folder>/train_log.txt
+
+batch_size: 64
+number_of_epochs: 250
+lr: 0.001
+avg_checkpoints: 10 # Number of checkpoints to average for evaluation
+num_workers: 1
+
+# Output
+save_folder: !ref <output_folder>/save
+
+img_size: 64
+patch_size: 4
+in_chans: 3
+num_classes: 200
+embed_dim: 192
+depth: 6
+num_heads: 3
+mlp_ratio: 4.0
+qkv_bias: True
+drop_rate: 0.1  # Head dropout rate.
+pos_drop_rate: 0.1  # Position embedding dropout rate.
+attn_drop_rate: 0.0  # Attention dropout rate.
+drop_path_rate: 0.1 # Stochastic depth rate
+
+model: !new:timm.models.vision_transformer.VisionTransformer
+  img_size: !ref <img_size> 
+  patch_size: !ref <patch_size> 
+  in_chans: !ref <in_chans> 
+  num_classes: !ref <num_classes> 
+  embed_dim: !ref <embed_dim> 
+  depth: !ref <depth> 
+  num_heads: !ref <num_heads> 
+  mlp_ratio: !ref <mlp_ratio> 
+  qkv_bias: !ref <qkv_bias> 
+  norm_layer: !name:torch.nn.LayerNorm
+
+modules:
+  model: !ref <model>
+
+dataset_fraction: 1
+
+# Loss and Optimizer
+log_softmax: !new:speechbrain.nnet.activations.Softmax
+  apply_log: True
+
+loss: !name:speechbrain.nnet.losses.nll_loss
+
+weight_decay: 0.0001
+optimizer: !name:torch.optim.Adam
+  lr: !ref <lr>
+  betas: (0.9, 0.98)
+  eps: 0.000000001
+  weight_decay: !ref <weight_decay>
+
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+  limit: !ref <number_of_epochs>
+
+n_warmup_steps: 50000
+noam_annealing: !new:speechbrain.nnet.schedulers.NoamScheduler
+  lr_initial: !ref <lr>
+  n_warmup_steps: !ref <n_warmup_steps>
+
+# Checkpointer
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+  checkpoints_dir: !ref <save_folder>
+  recoverables:
+    model: !ref <model>
+    noam_scheduler: !ref <noam_annealing>
+    optimizer: !ref <optimizer>
+    counter: !ref <epoch_counter>
+
+
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+  save_file: !ref <train_log>
+
+acc_computer: !name:speechbrain.utils.Accuracy.AccuracyStats
