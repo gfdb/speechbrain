@@ -91,6 +91,7 @@ if __name__ == "__main__":
     # Tiny ImageNet-specific normalization
     transform = transforms.Compose(
         [
+            transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=[0.480, 0.448, 0.398], std=[0.277, 0.269, 0.282]
