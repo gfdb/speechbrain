@@ -26,7 +26,7 @@ class Imagenet100Brain(sb.core.Brain):
         inputs, targets = inputs.to(self.device), targets.to(self.device)
         
         if stage == sb.Stage.TRAIN:
-            inputs, targets = self.hparams["mixup_fn"](inputs, targets)
+            inputs, targets = self.hparams.mixup_fn(inputs, targets)
         
         outputs = self.modules.model(inputs)
         return outputs, targets

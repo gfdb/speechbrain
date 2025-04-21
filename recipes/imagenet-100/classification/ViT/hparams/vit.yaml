@@ -50,7 +50,9 @@ dataset_fraction: 1
 log_softmax: !new:speechbrain.nnet.activations.Softmax
   apply_log: True
 
-loss: !name:speechbrain.nnet.losses.nll_loss
+#loss: !name:speechbrain.nnet.losses.nll_loss
+loss: !new:torch.nn.KLDivLoss
+  reduction: batchmean
 
 mixup_fn: !new:timm.data.mixup.Mixup
   mixup_alpha: 0.8
