@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 
 # Brain Class for Tiny ImageNet
-class TinyImageNetBrain(sb.core.Brain):
+class Imagenet100Brain(sb.core.Brain):
     def compute_forward(self, batch, stage):
         inputs, _ = batch
         inputs = inputs.to(self.device)
@@ -91,7 +91,6 @@ if __name__ == "__main__":
     # Tiny ImageNet-specific normalization
     transform = transforms.Compose(
         [
-            transforms.Resize((64, 64)),  # Tiny ImageNet images are 64x64
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=[0.480, 0.448, 0.398], std=[0.277, 0.269, 0.282]
@@ -108,37 +107,16 @@ if __name__ == "__main__":
     print(total_samples)
     subset_size = int(hparams["dataset_fraction"] * total_samples)
     print(subset_size)
+
     # Fix seed for reproducibility
     rng = np.random.default_rng(seed=42)
     subset_indices = rng.choice(total_samples, size=subset_size, replace=False)
 
     train_set = Subset(train_full, subset_indices)
 
-    # Custom Tiny ImageNet validation loader handling
-    val_dir = os.path.join(hparams["data_folder"], "val")
-    val_img_dir = os.path.join(val_dir, "images")
-    val_annotations = os.path.join(val_dir, "val_annotations.txt")
-
-    # Build mapping from val_annotations.txt
-    import shutil
-    from collections import defaultdict
-
-    val_labels = defaultdict(str)
-    with open(val_annotations, "r") as f:
-        for line in f:
-            parts = line.strip().split("\t")
-            val_labels[parts[0]] = parts[1]
-
-    # Organize validation images into subfolders
-    for fname, cls in val_labels.items():
-        cls_folder = os.path.join(val_img_dir, cls)
-        os.makedirs(cls_folder, exist_ok=True)
-        src = os.path.join(val_img_dir, fname)
-        dst = os.path.join(cls_folder, fname)
-        if os.path.exists(src) and not os.path.exists(dst):
-            shutil.move(src, dst)
-
-    valid_set = ImageFolder(root=val_img_dir, transform=transform)
+    valid_set = ImageFolder(
+        root=os.path.join(hparams["data_folder"], "val"), transform=transform
+    )
 
     train_loader = DataLoader(
         train_set,
@@ -153,7 +131,7 @@ if __name__ == "__main__":
         num_workers=hparams["num_workers"],
     )
 
-    brain = TinyImageNetBrain(
+    brain = Imagenet100Brain(
         modules=hparams["modules"],
         opt_class=hparams["optimizer"],
         hparams=hparams,

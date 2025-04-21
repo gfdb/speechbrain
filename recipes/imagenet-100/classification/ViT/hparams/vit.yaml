@@ -1,11 +1,9 @@
-# CIFAR-100 config for SpeechBrain
-
 seed: 1337
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
 
 # Dataset
-output_folder: !ref results/tiny-imagenet-200
-data_folder: /home/gfdb/datasets/tiny-imagenet-200
+output_folder: !ref results/imagenet-100
+data_folder: /home/gfdb/datasets/imagenet-100
 train_log: !ref <output_folder>/train_log.txt
 
 batch_size: 64
@@ -20,7 +18,7 @@ save_folder: !ref <output_folder>/save
 img_size: 64
 patch_size: 4
 in_chans: 3
-num_classes: 200
+num_classes: 100
 embed_dim: 192
 depth: 6
 num_heads: 3
