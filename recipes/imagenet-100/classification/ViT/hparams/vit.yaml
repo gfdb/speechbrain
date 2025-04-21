@@ -15,7 +15,7 @@ num_workers: 1
 # Output
 save_folder: !ref <output_folder>/save
 
-img_size: 64
+img_size: 224
 patch_size: 4
 in_chans: 3
 num_classes: 100
