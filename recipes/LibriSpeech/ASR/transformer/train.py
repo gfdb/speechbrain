@@ -44,6 +44,7 @@ from hyperpyyaml import load_hyperpyyaml
 
 import speechbrain as sb
 from speechbrain.utils.distributed import if_main_process, run_on_main
+import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +57,16 @@ class ASR(sb.core.Brain):
         wavs, wav_lens = batch.sig
         tokens_bos, _ = batch.tokens_bos
 
+        similarity_loss = 0
+
         # Add waveform augmentation if specified.
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment") and (
             not hasattr(self.hparams, "augment_device") or self.hparams.augment_device == "cuda"
         ):
+            original_bs = wavs.shape[0]
             wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
             tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
-
+                
         # compute features
         feats = self.hparams.compute_features(wavs)
         current_epoch = self.hparams.epoch_counter.current
@@ -81,6 +85,30 @@ class ASR(sb.core.Brain):
         enc_out, pred = self.modules.Transformer(
             src, tokens_bos, wav_lens, pad_idx=self.hparams.pad_index
         )
+
+        kl_loss = 0
+        if stage == sb.Stage.TRAIN:
+            if hasattr(self.hparams, "sim_loss") and self.hparams["sim_loss"]:
+                bs = self.hparams.batch_size
+                multi = self.hparams.wav_augment.batch_multiplier
+                # total should be bs * (multi + 1)
+                assert enc_out.size(0) == bs * (multi + 1)
+
+                dirty = enc_out[: bs * multi]             # [multi*bs, T, D]
+                clean = enc_out[bs * multi : ]            # [   bs, T, D]
+
+                # detach clean so no grad flows back through it
+                clean = clean.detach()
+
+                # now make your distributions
+                dirty_logp  = F.log_softmax(dirty, dim=-1)
+                clean_p     = F.softmax(clean,  dim=-1)
+
+                # repeat each clean sample `multi` times
+                clean_p_rep = clean_p.repeat_interleave(multi, dim=0)
+
+                # compute KL‑divergence
+                kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean")
 
         # output layer for ctc log-probabilities
         logits = self.modules.ctc_lin(enc_out)
@@ -113,12 +141,12 @@ class ASR(sb.core.Brain):
                     enc_out.detach(), wav_lens
                 )
 
-        return p_ctc, p_seq, wav_lens, hyps
+        return p_ctc, p_seq, wav_lens, hyps, kl_loss
 
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss (CTC+NLL) given predictions and targets."""
 
-        (p_ctc, p_seq, wav_lens, hyps) = predictions
+        (p_ctc, p_seq, wav_lens, hyps, kl_loss) = predictions
 
         ids = batch.id
         tokens_eos, tokens_eos_lens = batch.tokens_eos
@@ -154,10 +182,18 @@ class ASR(sb.core.Brain):
             p_ctc, tokens, wav_lens, tokens_lens
         ).sum()
 
-        loss = (
-            self.hparams.ctc_weight * loss_ctc
-            + (1 - self.hparams.ctc_weight) * loss_seq
-        )
+        if stage == sb.Stage.TRAIN and getattr(self.hparams, "sim_loss", False):
+            loss = (
+                self.hparams.ctc_weight * loss_ctc
+                + (1 - self.hparams.ctc_weight) * loss_seq
+            ) + kl_loss
+        else:
+            loss = (
+                self.hparams.ctc_weight * loss_ctc
+                + (1 - self.hparams.ctc_weight) * loss_seq
+            )
+
+        
 
         if stage != sb.Stage.TRAIN:
             current_epoch = self.hparams.epoch_counter.current

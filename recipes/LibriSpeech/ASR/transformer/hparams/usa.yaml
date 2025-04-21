@@ -315,6 +315,9 @@ batch_multiplier: 3
 concat_original: True
 aug_strategy: 'random'
 augment_device: 'cuda'
+
+sim_loss: True            # turn the KL‐term on/off
+sim_loss_weight: 0.1      # how strongly to weight it
  
 wav_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     augmentations: [
