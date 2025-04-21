@@ -52,9 +52,6 @@ log_softmax: !new:speechbrain.nnet.activations.Softmax
 
 loss: !name:speechbrain.nnet.losses.nll_loss
 
-# Augmentation 
-from  import Mixup
-
 mixup_fn: !new:timm.data.mixup.Mixup
   mixup_alpha: 0.8
   cutmix_alpha: 1.0
@@ -75,10 +72,10 @@ optimizer: !name:torch.optim.AdamW
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
   limit: !ref <number_of_epochs>
 
-n_warmup_steps: 50000
+n_warmup_steps: 2000
 noam_annealing: !new:speechbrain.nnet.schedulers.CosineScheduler
   lr_initial: !ref <lr>
-  n_warmup_steps: 2000
+  n_warmup_steps: !ref <n_warmup_steps>
   n_total_steps: 101500
   lr_min: 0.00001
 
