@@ -22,16 +22,19 @@ logger = get_logger(__name__)
 # Brain Class for Tiny ImageNet
 class Imagenet100Brain(sb.core.Brain):
     def compute_forward(self, batch, stage):
-        inputs, _ = batch
-        inputs = inputs.to(self.device)
+        inputs, targets = batch
+        inputs, targets = inputs.to(self.device), targets.to(self.device)
+        
+        if stage == sb.Stage.TRAIN:
+            inputs, targets = self.hparams["mixup_fn"](inputs, targets)
+        
         outputs = self.modules.model(inputs)
-        return outputs
+        return outputs, targets
 
     def compute_objectives(self, predictions, batch, stage):
-        _, targets = batch
-        targets = targets.to(self.device)
+        outputs, targets = predictions
 
-        log_probs = self.hparams.log_softmax(predictions)
+        log_probs = self.hparams.log_softmax(outputs)
         loss = self.hparams.loss(log_probs, targets)
 
         if stage != sb.Stage.TRAIN:
