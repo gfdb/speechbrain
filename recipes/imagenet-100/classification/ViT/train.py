@@ -35,8 +35,13 @@ class Imagenet100Brain(sb.core.Brain):
         outputs, targets = predictions
 
         log_probs = self.hparams.log_softmax(outputs)
-        loss = self.hparams.loss(log_probs, targets)
-
+        
+        if stage == sb.Stage.TRAIN:
+            loss = self.hparams.loss(log_probs, targets)  # soft targets from mixup
+        else:
+            # Convert hard labels to long and use nll_loss
+            loss = sb.nnet.losses.nll_loss(log_probs, targets.long())
+        
         if stage != sb.Stage.TRAIN:
             self.acc_metric.append(log_probs, targets.unsqueeze(0))
         return loss
@@ -127,12 +132,14 @@ if __name__ == "__main__":
         batch_size=hparams["batch_size"],
         shuffle=True,
         num_workers=hparams["num_workers"],
+        drop_last=True
     )
     valid_loader = DataLoader(
         valid_set,
         batch_size=hparams["batch_size"],
         shuffle=False,
         num_workers=hparams["num_workers"],
+        drop_last=True
     )
 
     brain = Imagenet100Brain(
