@@ -88,7 +88,7 @@ class ASR(sb.core.Brain):
 
         kl_loss = 0
         if stage == sb.Stage.TRAIN:
-            if hasattr(self.hparams, "sim_loss") and self.hparams["sim_loss"]:
+            if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss:
                 bs = self.hparams.batch_size
                 multi = self.hparams.wav_augment.batch_multiplier
                 # total should be bs * (multi + 1)
