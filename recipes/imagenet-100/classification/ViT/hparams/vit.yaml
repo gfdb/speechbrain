@@ -8,7 +8,7 @@ train_log: !ref <output_folder>/train_log.txt
 
 batch_size: 128
 number_of_epochs: 100
-lr: 0.001
+lr: 0.003
 avg_checkpoints: 10 # Number of checkpoints to average for evaluation
 num_workers: 1
 
@@ -27,7 +27,7 @@ qkv_bias: True
 drop_rate: 0.1  # Head dropout rate.
 pos_drop_rate: 0.1  # Position embedding dropout rate.
 attn_drop_rate: 0.0  # Attention dropout rate.
-drop_path_rate: 0.1 # Stochastic depth rate
+drop_path_rate: 0.2 # Stochastic depth rate
 
 model: !new:timm.models.vision_transformer.VisionTransformer
   img_size: !ref <img_size> 
@@ -46,12 +46,12 @@ modules:
 
 dataset_fraction: 1
 
-# Loss and Optimizer
 log_softmax: !new:speechbrain.nnet.activations.Softmax
   apply_log: True
 
-#loss: !name:speechbrain.nnet.losses.nll_loss
-loss: !new:torch.nn.KLDivLoss
+# Loss and Optimizer
+nll_loss: !name:speechbrain.nnet.losses.nll_loss
+soft_loss: !new:torch.nn.KLDivLoss
   reduction: batchmean
 
 mixup_fn: !new:timm.data.mixup.Mixup
@@ -64,7 +64,7 @@ mixup_fn: !new:timm.data.mixup.Mixup
   num_classes: 100
 
 
-weight_decay: 0.01
+weight_decay: 0.05
 optimizer: !name:torch.optim.AdamW
   lr: !ref <lr>
   betas: (0.9, 0.98)
@@ -74,12 +74,12 @@ optimizer: !name:torch.optim.AdamW
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
   limit: !ref <number_of_epochs>
 
-n_warmup_steps: 2000
+n_warmup_steps: 4000
 noam_annealing: !new:speechbrain.nnet.schedulers.CosineScheduler
   lr_initial: !ref <lr>
   n_warmup_steps: !ref <n_warmup_steps>
   n_total_steps: 101500
-  lr_min: 0.00001
+  lr_min: 0.000001
 
 # Checkpointer
 checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
