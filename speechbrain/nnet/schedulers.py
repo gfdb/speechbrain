@@ -1661,3 +1661,69 @@ class TriStageLRSchedule:
         self.init_lr = data["init_lr"]
         self.warmup_rate = data["warmup_rate"]
         self.decay_factor = data["decay_factor"]
+
+@checkpoints.register_checkpoint_hooks
+class CosineScheduler:
+    """
+    Cosine Annealing learning rate scheduler with warmup.
+    Increases LR linearly for `n_warmup_steps`, then decays to `lr_min` using cosine.
+
+    Arguments
+    ---------
+    lr_initial : float
+        Peak learning rate (after warmup).
+    n_warmup_steps : int
+        Number of steps for warmup.
+    n_total_steps : int
+        Total number of steps in training.
+    lr_min : float
+        Final learning rate at the end of training (default: 0).
+
+    Example
+    -------
+    >>> optim = torch.optim.Adam(model.parameters(), lr=1)
+    >>> scheduler = CosineScheduler(lr_initial=1e-3, n_warmup_steps=1000, n_total_steps=10000)
+    >>> curr_lr, next_lr = scheduler(optim)
+    """
+
+    def __init__(self, lr_initial, n_warmup_steps, n_total_steps, lr_min=0.0):
+        self.lr_initial = lr_initial
+        self.lr_min = lr_min
+        self.n_warmup_steps = n_warmup_steps
+        self.n_total_steps = n_total_steps
+        self.n_steps = 0
+        self.current_lr = 0.0
+        self.losses = []
+
+    def __call__(self, opt):
+        self.n_steps += 1
+        current_lr = opt.param_groups[0]["lr"]
+        lr = self._get_lr()
+
+        for param_group in opt.param_groups:
+            param_group["lr"] = lr
+
+        self.current_lr = lr
+        return current_lr, lr
+
+    def _get_lr(self):
+        step = self.n_steps
+
+        if step < self.n_warmup_steps:
+            return self.lr_initial * step / self.n_warmup_steps
+
+        progress = (step - self.n_warmup_steps) / max(1, self.n_total_steps - self.n_warmup_steps)
+        cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
+        return self.lr_min + (self.lr_initial - self.lr_min) * cosine_decay
+
+    @checkpoints.mark_as_saver
+    def save(self, path):
+        data = {"losses": self.losses, "n_steps": self.n_steps}
+        torch.save(data, path)
+
+    @checkpoints.mark_as_loader
+    def load(self, path, end_of_epoch=False):
+        del end_of_epoch
+        data = torch.load(path)
+        self.losses = data["losses"]
+        self.n_steps = data["n_steps"]

@@ -1,15 +1,13 @@
-# CIFAR-100 config for SpeechBrain
-
 seed: 1337
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
 
 # Dataset
-output_folder: !ref results/tiny-imagenet-200
-data_folder: /home/gfdb/datasets/tiny-imagenet-200
+output_folder: !ref results/imagenet-100
+data_folder: /home/gfdb/datasets/imagenet-100
 train_log: !ref <output_folder>/train_log.txt
 
-batch_size: 64
-number_of_epochs: 250
+batch_size: 128
+number_of_epochs: 100
 lr: 0.001
 avg_checkpoints: 10 # Number of checkpoints to average for evaluation
 num_workers: 1
@@ -17,10 +15,10 @@ num_workers: 1
 # Output
 save_folder: !ref <output_folder>/save
 
-img_size: 64
-patch_size: 4
+img_size: 224
+patch_size: 8
 in_chans: 3
-num_classes: 200
+num_classes: 100
 embed_dim: 192
 depth: 6
 num_heads: 3
@@ -52,10 +50,22 @@ dataset_fraction: 1
 log_softmax: !new:speechbrain.nnet.activations.Softmax
   apply_log: True
 
-loss: !name:speechbrain.nnet.losses.nll_loss
+#loss: !name:speechbrain.nnet.losses.nll_loss
+loss: !new:torch.nn.KLDivLoss
+  reduction: batchmean
 
-weight_decay: 0.0001
-optimizer: !name:torch.optim.Adam
+mixup_fn: !new:timm.data.mixup.Mixup
+  mixup_alpha: 0.8
+  cutmix_alpha: 1.0
+  prob: 1.0              # always apply mixup/cutmix
+  switch_prob: 0.5       # 50/50 mixup/cutmix
+  mode: 'batch'
+  label_smoothing: 0.1
+  num_classes: 100
+
+
+weight_decay: 0.01
+optimizer: !name:torch.optim.AdamW
   lr: !ref <lr>
   betas: (0.9, 0.98)
   eps: 0.000000001
@@ -64,10 +74,12 @@ optimizer: !name:torch.optim.Adam
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
   limit: !ref <number_of_epochs>
 
-n_warmup_steps: 50000
-noam_annealing: !new:speechbrain.nnet.schedulers.NoamScheduler
+n_warmup_steps: 2000
+noam_annealing: !new:speechbrain.nnet.schedulers.CosineScheduler
   lr_initial: !ref <lr>
   n_warmup_steps: !ref <n_warmup_steps>
+  n_total_steps: 101500
+  lr_min: 0.00001
 
 # Checkpointer
 checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
