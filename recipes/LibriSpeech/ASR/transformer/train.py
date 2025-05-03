@@ -57,13 +57,12 @@ class ASR(sb.core.Brain):
         wavs, wav_lens = batch.sig
         tokens_bos, _ = batch.tokens_bos
 
-        similarity_loss = 0
+        original_bs = wavs.shape[0]
 
         # Add waveform augmentation if specified.
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment") and (
             not hasattr(self.hparams, "augment_device") or self.hparams.augment_device == "cuda"
         ):
-            original_bs = wavs.shape[0]
             wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
             tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
                 
@@ -86,30 +85,6 @@ class ASR(sb.core.Brain):
             src, tokens_bos, wav_lens, pad_idx=self.hparams.pad_index
         )
 
-        kl_loss = 0
-        if stage == sb.Stage.TRAIN:
-            if hasattr(self.hparams, "sim_loss") and self.hparams["sim_loss"]:
-                bs = self.hparams.batch_size
-                multi = self.hparams.wav_augment.batch_multiplier
-                # total should be bs * (multi + 1)
-                assert enc_out.size(0) == bs * (multi + 1)
-
-                dirty = enc_out[: bs * multi]             # [multi*bs, T, D]
-                clean = enc_out[bs * multi : ]            # [   bs, T, D]
-
-                # detach clean so no grad flows back through it
-                clean = clean.detach()
-
-                # now make your distributions
-                dirty_logp  = F.log_softmax(dirty, dim=-1)
-                clean_p     = F.softmax(clean,  dim=-1)
-
-                # repeat each clean sample `multi` times
-                clean_p_rep = clean_p.repeat_interleave(multi, dim=0)
-
-                # compute KL‑divergence
-                kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean")
-
         # output layer for ctc log-probabilities
         logits = self.modules.ctc_lin(enc_out)
         p_ctc = self.hparams.log_softmax(logits)
@@ -117,6 +92,31 @@ class ASR(sb.core.Brain):
         # output layer for seq2seq log-probabilities
         pred = self.modules.seq_lin(pred)
         p_seq = self.hparams.log_softmax(pred)
+
+        kl_loss = 0
+        if stage == sb.Stage.TRAIN:
+            if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss:
+                bs = original_bs
+                multi = self.hparams.wav_augment.batch_multiplier
+                # total should be bs * (multi + 1)
+                assert pred.size(0) == bs * (multi + 1)
+
+                dirty = pred[: bs * multi]             # [multi*bs, T, D]
+                clean = pred[bs * multi : ]            # [   bs, T, D]
+
+                # detach clean so no grad flows back through it
+                clean = clean.detach()
+
+                # now make distributions
+                dirty_logp  = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
+                clean_p     = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
+
+                # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
+                clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
+
+                # compute KL‑divergence
+                # KL(Q=clean ∥ P=dirty)
+                kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
 
         # Compute outputs
         hyps = None
