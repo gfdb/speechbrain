@@ -186,7 +186,7 @@ class ASR(sb.core.Brain):
             loss = (
                 self.hparams.ctc_weight * loss_ctc
                 + (1 - self.hparams.ctc_weight) * loss_seq
-            ) + kl_loss
+            ) + kl_loss * self.hparams.sim_loss_weight
         else:
             loss = (
                 self.hparams.ctc_weight * loss_ctc
