@@ -26,23 +26,35 @@ class Imagenet100Brain(sb.core.Brain):
         inputs, targets = inputs.to(self.device), targets.to(self.device)
         
         if stage == sb.Stage.TRAIN:
-            inputs, targets = self.hparams["mixup_fn"](inputs, targets)
+            inputs, targets = self.hparams.mixup_fn(inputs, targets)
         
         outputs = self.modules.model(inputs)
         return outputs, targets
 
     def compute_objectives(self, predictions, batch, stage):
-        outputs, targets = predictions
+        outputs, soft_targets = predictions
+        _, hard_targets = batch
 
         log_probs = self.hparams.log_softmax(outputs)
-        loss = self.hparams.loss(log_probs, targets)
+        
+        if stage == sb.Stage.TRAIN:
+            loss = self.hparams.soft_loss(log_probs, soft_targets)  # soft targets from mixup
+       
+            with torch.no_grad():
+                # Convert hard labels to long and use nll_loss
+                hard_loss = self.hparams.nll_loss(log_probs, hard_targets)
+                self._hard_losses.append(hard_loss.item())
+       else: 
+            loss = self.hparams.nll_loss(log_probs, hard_targets)
 
         if stage != sb.Stage.TRAIN:
-            self.acc_metric.append(log_probs, targets.unsqueeze(0))
+            self.acc_metric.append(log_probs, hard_targets.unsqueeze(0))
         return loss
 
     def on_stage_start(self, stage, epoch=None):
-        if stage != sb.Stage.TRAIN:
+        if stage == sb.Stage.TRAIN:
+            self._hard_losses = []
+        else:
             self.acc_metric = self.hparams.acc_computer()
 
     def on_stage_end(self, stage, stage_loss, epoch):
@@ -51,8 +63,10 @@ class Imagenet100Brain(sb.core.Brain):
             stage_stats["ACC"] = self.acc_metric.summarize()
 
         if stage == sb.Stage.TRAIN:
+            avg_hard = sum(self._hard_losses) / len(self._hard_losses)
+            stage_stats["hard_loss"] = avg_hard
             self.train_stats = stage_stats
-
+            
         if stage == sb.Stage.VALID:
             lr = self.hparams.noam_annealing.current_lr
             steps = self.optimizer_step
@@ -127,12 +141,14 @@ if __name__ == "__main__":
         batch_size=hparams["batch_size"],
         shuffle=True,
         num_workers=hparams["num_workers"],
+        drop_last=True
     )
     valid_loader = DataLoader(
         valid_set,
         batch_size=hparams["batch_size"],
         shuffle=False,
         num_workers=hparams["num_workers"],
+        drop_last=True
     )
 
     brain = Imagenet100Brain(
