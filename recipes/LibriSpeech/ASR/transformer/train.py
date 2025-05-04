@@ -254,13 +254,9 @@ def dataio_prepare(hparams):
         csv_path=hparams["train_csv"],
         replacements={"data_root": data_folder},
     )
-    print('total samples:', len(train_data))
     num_samples = int(len(train_data) * hparams["dataset_fraction"])
-    print('total ids:', len(train_data.data_ids))
     sampled_ids = random.sample(train_data.data_ids, num_samples)
     train_data = FilteredSortedDynamicItemDataset(train_data, sampled_ids)
-    print('num_samples_subset:', len(train_data)) 
-    print('total ids:', len(train_data.data_ids))
 
     if hparams["sorting"] == "ascending":
         # we sort training data to speed up training and get better results.
