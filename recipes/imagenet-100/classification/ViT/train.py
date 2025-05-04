@@ -44,7 +44,7 @@ class Imagenet100Brain(sb.core.Brain):
                 # Convert hard labels to long and use nll_loss
                 hard_loss = self.hparams.nll_loss(log_probs, hard_targets)
                 self._hard_losses.append(hard_loss.item())
-       else: 
+        else: 
             loss = self.hparams.nll_loss(log_probs, hard_targets)
 
         if stage != sb.Stage.TRAIN:
