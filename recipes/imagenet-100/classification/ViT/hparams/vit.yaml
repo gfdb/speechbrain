@@ -10,7 +10,7 @@ batch_size: 128
 number_of_epochs: 100
 lr: 0.003
 avg_checkpoints: 10 # Number of checkpoints to average for evaluation
-num_workers: 1
+num_workers: 2
 
 # Output
 save_folder: !ref <output_folder>/save
