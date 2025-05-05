@@ -96,7 +96,7 @@ class ASR(sb.core.Brain):
         clean_kl_loss = 0
         dirty_kl_loss = 0
         if stage == sb.Stage.TRAIN:
-            if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss:
+            if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss and self.hparams.dirty_kl_loss:
                 bs = original_bs
                 multi = self.hparams.wav_augment.batch_multiplier
                 # total should be bs * (multi + 1)
@@ -105,30 +105,7 @@ class ASR(sb.core.Brain):
                 dirty = pred[: bs * multi]             # [multi*bs, T, D]
                 clean = pred[bs * multi : ]            # [   bs, T, D]
 
-                # detach clean so no grad flows back through it
-                clean = clean.detach()
-
-                # now make distributions
-                dirty_logp  = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
-                clean_p     = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
-
-                # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
-                clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
-
-                # compute KL‑divergence
-                # KL(Q=clean ∥ P=dirty)
-                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
-
-            if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss and self.hparams.bidirec_kl:
-                bs = original_bs
-                multi = self.hparams.wav_augment.batch_multiplier
-                # total should be bs * (multi + 1)
-                assert pred.size(0) == bs * (multi + 1)
-
-                dirty = pred[: bs * multi]             # [multi*bs, T, D]
-                clean = pred[bs * multi : ]            # [   bs, T, D]
-
-                if hasattr(self.haprams, 'dirty_kl_loss' and self.hparams.dirty_kl_loss):
+                if hasattr(self.hparams, 'dirty_kl_loss') and self.hparams.dirty_kl_loss:
                     dirty1 = pred[:bs]
                     dirty2 = pred[bs:2*bs]
                     dirty3 = pred[2*bs:3*bs]
@@ -141,14 +118,13 @@ class ASR(sb.core.Brain):
                     dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty3), F.softmax(dirty2 ,dim=-1) , reduction="batchmean")
 
                     dirty_kl_loss = dirty_kl_loss / 6
-                print('dirty kl:', dirty_kl_loss)
                 # detach clean so no grad flows back through it
                 clean = clean.detach()
 
                 
                 # now make distributions
-                dirty_logp  = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
-                clean_p     = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
+                dirty_logp  = self.hparams.log_softmax(dirty) # do log here --> `log P(x)`
+                clean_p     = F.softmax(clean,  dim=-1) # no log --> Q(x)
 
                 # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
                 clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
@@ -156,7 +132,6 @@ class ASR(sb.core.Brain):
                 # compute KL‑divergence
                 # KL(Q=clean ∥ P=dirty)
                 clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
-                print('clean_kl_loss:', clean_kl_loss)
         # Compute outputs
         hyps = None
         current_epoch = self.hparams.epoch_counter.current
