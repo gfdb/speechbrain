@@ -476,6 +476,10 @@ seq_cost: !name:speechbrain.nnet.losses.kldiv_loss
     label_smoothing: !ref <label_smoothing>
     reduction: !ref <loss_reduction>
 
+sim_loss: True            # turn the KL‐term on/off
+sim_loss_weight: 0      # how strongly to weight it
+dirty_kl_loss: True
+
 noam_annealing: !new:speechbrain.nnet.schedulers.NoamScheduler
     lr_initial: !ref <lr_adam>
     n_warmup_steps: 25000

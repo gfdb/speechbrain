@@ -93,7 +93,8 @@ class ASR(sb.core.Brain):
         pred = self.modules.seq_lin(pred)
         p_seq = self.hparams.log_softmax(pred)
 
-        kl_loss = 0
+        clean_kl_loss = 0
+        dirty_kl_loss = 0
         if stage == sb.Stage.TRAIN:
             if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss:
                 bs = original_bs
@@ -116,8 +117,46 @@ class ASR(sb.core.Brain):
 
                 # compute KL‑divergence
                 # KL(Q=clean ∥ P=dirty)
-                kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
+                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
 
+            if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss and self.hparams.bidirec_kl:
+                bs = original_bs
+                multi = self.hparams.wav_augment.batch_multiplier
+                # total should be bs * (multi + 1)
+                assert pred.size(0) == bs * (multi + 1)
+
+                dirty = pred[: bs * multi]             # [multi*bs, T, D]
+                clean = pred[bs * multi : ]            # [   bs, T, D]
+
+                if hasattr(self.haprams, 'dirty_kl_loss' and self.hparams.dirty_kl_loss):
+                    dirty1 = pred[:bs]
+                    dirty2 = pred[bs:2*bs]
+                    dirty3 = pred[2*bs:3*bs]
+
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty1), F.softmax(dirty2 ,dim=-1) , reduction="batchmean")
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty1), F.softmax(dirty3,dim=-1) , reduction="batchmean")
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty2), F.softmax(dirty3 ,dim=-1) , reduction="batchmean")
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty2), F.softmax(dirty1 ,dim=-1) , reduction="batchmean")
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty3), F.softmax(dirty1 ,dim=-1) , reduction="batchmean")
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty3), F.softmax(dirty2 ,dim=-1) , reduction="batchmean")
+
+                    dirty_kl_loss = dirty_kl_loss / 6
+                print('dirty kl:', dirty_kl_loss)
+                # detach clean so no grad flows back through it
+                clean = clean.detach()
+
+                
+                # now make distributions
+                dirty_logp  = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
+                clean_p     = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
+
+                # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
+                clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
+
+                # compute KL‑divergence
+                # KL(Q=clean ∥ P=dirty)
+                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
+                print('clean_kl_loss:', clean_kl_loss)
         # Compute outputs
         hyps = None
         current_epoch = self.hparams.epoch_counter.current
@@ -141,12 +180,12 @@ class ASR(sb.core.Brain):
                     enc_out.detach(), wav_lens
                 )
 
-        return p_ctc, p_seq, wav_lens, hyps, kl_loss
+        return p_ctc, p_seq, wav_lens, hyps, clean_kl_loss, dirty_kl_loss
 
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss (CTC+NLL) given predictions and targets."""
 
-        (p_ctc, p_seq, wav_lens, hyps, kl_loss) = predictions
+        (p_ctc, p_seq, wav_lens, hyps, clean_kl_loss, dirty_kl_loss) = predictions
 
         ids = batch.id
         tokens_eos, tokens_eos_lens = batch.tokens_eos
@@ -186,7 +225,7 @@ class ASR(sb.core.Brain):
             loss = (
                 self.hparams.ctc_weight * loss_ctc
                 + (1 - self.hparams.ctc_weight) * loss_seq
-            ) + kl_loss * self.hparams.sim_loss_weight
+            ) + clean_kl_loss * self.hparams.sim_loss_weight + 1 * dirty_kl_loss
         else:
             loss = (
                 self.hparams.ctc_weight * loss_ctc
