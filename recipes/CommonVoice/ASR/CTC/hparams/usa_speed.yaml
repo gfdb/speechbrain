@@ -248,7 +248,7 @@ babble_noise: !new:speechbrain.augment.time_domain.AddNoise
     noise_funct: !ref <sum_batch>
 
 min_num_aug: 2
-num_aug: 2
+num_aug: 3
 batch_multiplier: 3
 concat_original: True
 aug_strategy: 'classic'

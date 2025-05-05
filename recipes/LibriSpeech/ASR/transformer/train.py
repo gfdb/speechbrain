@@ -366,7 +366,7 @@ def dataio_prepare(hparams):
         sig = sb.dataio.dataio.read_audio(wav)
 
         if "usa_speed" in hparams and hparams["usa_speed"] and "speed_perturb" in hparams:
-            spd_prob = 0.5 # probability to apply speed perturbation 
+            spd_prob = 0.25 # probability to apply speed perturbation 
             if torch.randn((1,)).item() > spd_prob:
                 sig = hparams["speed_perturb"](sig.unsqueeze(0))
                 sig = sig.squeeze(0)
