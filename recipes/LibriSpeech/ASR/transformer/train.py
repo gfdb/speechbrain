@@ -96,7 +96,7 @@ class ASR(sb.core.Brain):
         clean_kl_loss = 0
         dirty_kl_loss = 0
         if stage == sb.Stage.TRAIN:
-            if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss and self.hparams.dirty_kl_loss:
+            if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss:
                 bs = original_bs
                 multi = self.hparams.wav_augment.batch_multiplier
                 # total should be bs * (multi + 1)
@@ -121,10 +121,13 @@ class ASR(sb.core.Brain):
                 # detach clean so no grad flows back through it
                 clean = clean.detach()
 
-                
-                # now make distributions
-                dirty_logp  = self.hparams.log_softmax(dirty) # do log here --> `log P(x)`
-                clean_p     = F.softmax(clean,  dim=-1) # no log --> Q(x)
+                if hasattr(self.hparams, "usa_speed") and self.hparams.usa_speed:
+                    # now make distributions
+                    dirty_logp = self.hparams.log_softmax(dirty) # do log here --> `log P(x)`
+                    clean_p = F.softmax(clean,  dim=-1) # no log --> Q(x)
+                else:
+                    dirty_logp = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
+                    clean_p = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
 
                 # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
                 clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
@@ -197,10 +200,17 @@ class ASR(sb.core.Brain):
         ).sum()
 
         if stage == sb.Stage.TRAIN and getattr(self.hparams, "sim_loss", False):
-            loss = (
-                self.hparams.ctc_weight * loss_ctc
-                + (1 - self.hparams.ctc_weight) * loss_seq
-            ) + clean_kl_loss * self.hparams.sim_loss_weight + 1 * dirty_kl_loss
+            if hasattr(self.hparams, "usa_speed") and self.hparams.usa_speed:
+                loss = (
+                    self.hparams.ctc_weight * loss_ctc
+                    + (1 - self.hparams.ctc_weight) * loss_seq
+                ) + clean_kl_loss * self.hparams.sim_loss_weight + self.hparams.dirty_kl_weight * dirty_kl_loss
+            else:
+                loss = (
+                    self.hparams.ctc_weight * loss_ctc
+                    + (1 - self.hparams.ctc_weight) * loss_seq
+                ) + clean_kl_loss * self.hparams.sim_loss_weight
+
         else:
             loss = (
                 self.hparams.ctc_weight * loss_ctc
@@ -380,7 +390,7 @@ def dataio_prepare(hparams):
         sig = sb.dataio.dataio.read_audio(wav)
 
         if "usa_speed" in hparams and hparams["usa_speed"] and "speed_perturb" in hparams:
-            spd_prob = 0.25 # probability to apply speed perturbation 
+            spd_prob = 0.1574 # probability to apply speed perturbation 
             if torch.randn((1,)).item() > spd_prob:
                 sig = hparams["speed_perturb"](sig.unsqueeze(0))
                 sig = sig.squeeze(0)
