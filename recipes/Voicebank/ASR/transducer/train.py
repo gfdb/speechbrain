@@ -27,6 +27,8 @@ class ASR_Brain(sb.Brain):
         batch = batch.to(self.device)
         wavs, wav_lens = batch.sig
         phns, phn_lens = batch.phn_encoded
+        
+        original_bs = wavs.size(0)
 
         # Add waveform augmentation if specified.
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
@@ -60,6 +62,31 @@ class ASR_Brain(sb.Brain):
 
         # output layer for seq2seq log-probabilities
         logits = self.modules.output(joint)
+        
+        clean_kl_loss = 0
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss: 
+            bs = original_bs
+            multi = self.hparams.wav_augment.batch_multiplier
+            # total should be bs * (multi + 1)
+            assert logits.size(0) == bs * (multi + 1)
+
+            dirty = logits[: bs * multi]
+            clean = logits[bs * multi : ]
+            
+            # detach clean so no grad flows back through it
+            clean = clean.detach()
+
+            # now make distributions
+            dirty_logp = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
+            clean_p = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
+
+            # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
+            clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
+
+            # compute KL‑divergence
+            # KL(Q=clean ∥ P=dirty)
+            clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
+
 
         if stage == sb.Stage.VALID:
             hyps, _, _, _ = self.hparams.Greedysearcher(x)
@@ -73,12 +100,13 @@ class ASR_Brain(sb.Brain):
                 nbest_scores,
             ) = self.hparams.Beamsearcher(x)
             return logits, wav_lens, best_hyps
-        return logits, wav_lens
+        return logits, wav_lens, clean_kl_loss
 
     def compute_objectives(self, predictions, batch, stage):
         "Given the network predictions and targets computed the loss."
         ids = batch.id
         phns, phn_lens = batch.phn_encoded
+        
 
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             phns = self.hparams.wav_augment.replicate_labels(phns)
@@ -89,12 +117,20 @@ class ASR_Brain(sb.Brain):
             phn_lens = self.hparams.fea_augment.replicate_labels(phn_lens)
 
         if stage == sb.Stage.TRAIN:
-            predictions, wav_lens = predictions
+            predictions, wav_lens, clean_kl_loss = predictions
         else:
             predictions, wav_lens, hyps = predictions
+       
+        if stage == sb.Stage.TRAIN and getattr(self.hparams, "sim_loss", False):
+            # Transducer loss use logits from RNN-T model. 
+            loss_seq = self.hparams.compute_cost(predictions, phns, wav_lens, phn_lens)
+            loss_clean_kl = clean_kl_loss * self.hparams.sim_loss_weight
 
-        # Transducer loss use logits from RNN-T model.
-        loss = self.hparams.compute_cost(predictions, phns, wav_lens, phn_lens)
+            loss = loss_seq + loss_clean_kl
+        else:
+            # Transducer loss use logits from RNN-T model. 
+            loss = self.hparams.compute_cost(predictions, phns, wav_lens, phn_lens)
+        
         self.transducer_metrics.append(
             ids, predictions, phns, wav_lens, phn_lens
         )

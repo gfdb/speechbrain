@@ -79,7 +79,7 @@ class ASR(sb.core.Brain):
             clean = clean.detach()
 
             # now make distributions
-            dirty_logp  = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
+            dirty_logp = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
             clean_p = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
 
             # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
@@ -124,9 +124,14 @@ class ASR(sb.core.Brain):
             tokens = self.hparams.fea_augment.replicate_labels(tokens)
             tokens_lens = self.hparams.fea_augment.replicate_labels(tokens_lens)
 
+        if stage == sb.Stage.TRAIN and getattr(self.hparams, "sim_loss", False):
+            loss_ctc = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
+            loss_clean_kl = clean_kl_loss * self.hparams.sim_loss_weight
 
-        loss = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
-
+            loss = loss_ctc + loss_clean_kl
+        else:
+            loss = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
+        
         if stage == sb.Stage.VALID:
             # Convert token indices to words
             predicted_words = self.tokenizer(p_tokens, task="decode_from_list")
