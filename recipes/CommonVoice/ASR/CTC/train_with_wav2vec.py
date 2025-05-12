@@ -47,6 +47,8 @@ class ASR(sb.core.Brain):
         wavs, wav_lens = batch.sig
         tokens_bos, _ = batch.tokens_bos
         wavs, wav_lens = wavs.to(self.device), wav_lens.to(self.device)
+        
+        original_bs = wavs.size(0)
 
         # Add waveform augmentation if specified.
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
@@ -62,6 +64,31 @@ class ASR(sb.core.Brain):
         x = self.modules.enc(feats)
         logits = self.modules.ctc_lin(x)
         p_ctc = self.hparams.log_softmax(logits)
+        
+        clean_kl_loss = 0
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss: 
+            bs = original_bs
+            multi = self.hparams.wav_augment.batch_multiplier
+            # total should be bs * (multi + 1)
+            assert logits.size(0) == bs * (multi + 1)
+
+            dirty = logits[: bs * multi]
+            clean = logits[bs * multi : ]
+            
+            # detach clean so no grad flows back through it
+            clean = clean.detach()
+
+            # now make distributions
+            dirty_logp  = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
+            clean_p = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
+
+            # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
+            clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
+
+            # compute KL‑divergence
+            # KL(Q=clean ∥ P=dirty)
+            clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
+
 
         p_tokens = None
         if stage == sb.Stage.VALID:
@@ -71,12 +98,12 @@ class ASR(sb.core.Brain):
         elif stage == sb.Stage.TEST:
             p_tokens = test_searcher(p_ctc, wav_lens)
 
-        return p_ctc, wav_lens, p_tokens
+        return p_ctc, wav_lens, p_tokens, clean_kl_loss
 
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss (CTC) given predictions and targets."""
 
-        p_ctc, wav_lens, p_tokens = predictions
+        p_ctc, wav_lens, p_tokens, clean_kl_loss = predictions
 
         ids = batch.id
         tokens_eos, tokens_eos_lens = batch.tokens_eos
