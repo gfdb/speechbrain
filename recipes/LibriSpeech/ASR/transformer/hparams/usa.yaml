@@ -318,6 +318,8 @@ augment_device: 'cuda'
 
 sim_loss: True            # turn the KL‐term on/off
 sim_loss_weight: 0      # how strongly to weight it
+
+clean_mse_weight: 0
  
 wav_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     augmentations: [
