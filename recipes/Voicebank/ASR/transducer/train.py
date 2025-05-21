@@ -18,6 +18,8 @@ import torch
 import speechbrain as sb
 from speechbrain.utils.distributed import run_on_main
 from hyperpyyaml import load_hyperpyyaml
+import torch.nn.functional as F
+
 
 
 # Define training procedure
@@ -69,7 +71,7 @@ class ASR_Brain(sb.Brain):
             multi = self.hparams.wav_augment.batch_multiplier
             # total should be bs * (multi + 1)
             assert logits.size(0) == bs * (multi + 1)
-
+            
             dirty = logits[: bs * multi]
             clean = logits[bs * multi : ]
             
@@ -77,8 +79,8 @@ class ASR_Brain(sb.Brain):
             clean = clean.detach()
 
             # now make distributions
-            dirty_logp = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
-            clean_p = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
+            dirty_logp = self.hparams.log_softmax(dirty).mean(dim=(1,2)) # do log here --> `log P(x)`
+            clean_p = F.softmax(clean, dim=-1).mean(dim=(1,2)) # no log --> Q(x)
 
             # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
             clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
@@ -125,7 +127,6 @@ class ASR_Brain(sb.Brain):
             # Transducer loss use logits from RNN-T model. 
             loss_seq = self.hparams.compute_cost(predictions, phns, wav_lens, phn_lens)
             loss_clean_kl = clean_kl_loss * self.hparams.sim_loss_weight
-
             loss = loss_seq + loss_clean_kl
         else:
             # Transducer loss use logits from RNN-T model. 

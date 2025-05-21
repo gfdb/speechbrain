@@ -34,6 +34,8 @@ import speechbrain as sb
 from speechbrain.tokenizers.SentencePiece import SentencePiece
 from speechbrain.utils.data_utils import undo_padding
 from speechbrain.utils.distributed import if_main_process, run_on_main
+import torch.nn.functional as F
+
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +91,6 @@ class ASR(sb.core.Brain):
             # KL(Q=clean ∥ P=dirty)
             clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
 
-
         p_tokens = None
         if stage == sb.Stage.VALID:
             p_tokens = sb.decoders.ctc_greedy_decode(
@@ -127,7 +128,6 @@ class ASR(sb.core.Brain):
         if stage == sb.Stage.TRAIN and getattr(self.hparams, "sim_loss", False):
             loss_ctc = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
             loss_clean_kl = clean_kl_loss * self.hparams.sim_loss_weight
-
             loss = loss_ctc + loss_clean_kl
         else:
             loss = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
