@@ -114,7 +114,7 @@ class ASR_Brain(sb.Brain):
                 dirty_logp = use_logsoftmax(dirty) # do log here --> `log P(x)`
                 clean_p = use_softmax(clean) # no log --> Q(x)
 
-            clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
+            clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
 
             # compute KL‑divergence
             # KL(Q=clean ∥ P=dirty)
