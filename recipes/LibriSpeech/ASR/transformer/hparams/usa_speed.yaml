@@ -481,6 +481,8 @@ sim_loss_weight: 0      # how strongly to weight it
 dirty_kl_loss: False
 dirty_kl_weight: 0
 
+clean_mse_weight: 0
+
 noam_annealing: !new:speechbrain.nnet.schedulers.NoamScheduler
     lr_initial: !ref <lr_adam>
     n_warmup_steps: 25000
