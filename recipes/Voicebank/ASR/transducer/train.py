@@ -66,7 +66,8 @@ class ASR_Brain(sb.Brain):
         logits = self.modules.output(joint)
         
         clean_kl_loss = 0
-        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss: 
+        dirty_kl_loss = 0
+        if stage == sb.Stage.TRAIN: 
             bs = original_bs
             multi = self.hparams.wav_augment.batch_multiplier
             # total should be bs * (multi + 1)
@@ -74,15 +75,45 @@ class ASR_Brain(sb.Brain):
             
             dirty = logits[: bs * multi]
             clean = logits[bs * multi : ]
-            
+
             # detach clean so no grad flows back through it
             clean = clean.detach()
 
-            # now make distributions
-            dirty_logp = self.hparams.log_softmax(dirty).mean(dim=(1,2)) # do log here --> `log P(x)`
-            clean_p = F.softmax(clean, dim=-1).mean(dim=(1,2)) # no log --> Q(x)
+            logsoftmax_mean = lambda x: self.hparams.log_softmax(x).mean(dim=(1,2))
+            logsoftmax_no_mean = lambda x: self.hparams.log_softmax(x)
+            
+            softmax_mean = lambda x: F.softmax(x, dim=-1).mean(dim=(1,2))
+            softmax_no_mean = lambda x: F.softmax(x, dim=-1)
 
-            # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
+            use_softmax = softmax_no_mean
+            use_logsoftmax = logsoftmax_no_mean
+
+            if hasattr(self.hparams, 'kl_mean_time_axis') and self.hparams.kl_mean_time_axis:
+                use_softmax = softmax_mean
+                use_logsoftmax = logsoftmax_mean
+            else:
+                use_softmax = softmax_no_mean
+                use_logsoftmax = logsoftmax_no_mean
+
+            if hasattr(self.hparams, 'kl_dirty') and self.hparams.kl_dirty:
+                dirty1 = logits[:bs]
+                dirty2 = logits[bs:2*bs]
+                dirty3 = logits[2*bs:3*bs]
+
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty2), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty3), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty3), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty1), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty1), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty2), reduction="batchmean")
+
+                dirty_kl_loss = dirty_kl_loss / 6
+
+            if hasattr(self.hparams, 'kl_clean') and self.hparams.kl_clean:
+                # now make distributions
+                dirty_logp = use_logsoftmax(dirty) # do log here --> `log P(x)`
+                clean_p = use_softmax(clean) # no log --> Q(x)
+
             clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
 
             # compute KL‑divergence
@@ -102,7 +133,7 @@ class ASR_Brain(sb.Brain):
                 nbest_scores,
             ) = self.hparams.Beamsearcher(x)
             return logits, wav_lens, best_hyps
-        return logits, wav_lens, clean_kl_loss
+        return logits, wav_lens, clean_kl_loss, dirty_kl_loss
 
     def compute_objectives(self, predictions, batch, stage):
         "Given the network predictions and targets computed the loss."
@@ -119,15 +150,16 @@ class ASR_Brain(sb.Brain):
             phn_lens = self.hparams.fea_augment.replicate_labels(phn_lens)
 
         if stage == sb.Stage.TRAIN:
-            predictions, wav_lens, clean_kl_loss = predictions
+            predictions, wav_lens, clean_kl_loss, dirty_kl_loss = predictions
         else:
             predictions, wav_lens, hyps = predictions
        
-        if stage == sb.Stage.TRAIN and getattr(self.hparams, "sim_loss", False):
+        if stage == sb.Stage.TRAIN:
             # Transducer loss use logits from RNN-T model. 
             loss_seq = self.hparams.compute_cost(predictions, phns, wav_lens, phn_lens)
-            loss_clean_kl = clean_kl_loss * self.hparams.sim_loss_weight
-            loss = loss_seq + loss_clean_kl
+            loss_clean_kl = clean_kl_loss * self.hparams.kl_clean_weight
+            loss_dirty_kl = dirty_kl_loss * self.hparams.kl_dirty_weight
+            loss = loss_seq + loss_clean_kl + loss_dirty_kl
         else:
             # Transducer loss use logits from RNN-T model. 
             loss = self.hparams.compute_cost(predictions, phns, wav_lens, phn_lens)
