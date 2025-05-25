@@ -294,9 +294,13 @@ output: !new:speechbrain.nnet.linear.Linear
     n_neurons: !ref <output_neurons>  # 42 phonemes + 1 blank
     bias: False
 
+kl_clean: False 
+kl_clean_weight: 0
 
-sim_loss: False 
-sim_loss_weight: 0
+kl_dirty: False
+kl_dirty_weight: 0
+
+kl_mean_time_axis: False
 
 log_softmax: !new:torch.nn.LogSoftmax
     dim: -1
