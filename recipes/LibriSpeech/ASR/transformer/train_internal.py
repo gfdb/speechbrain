@@ -102,9 +102,6 @@ class ASR(sb.core.Brain):
 
             dirty = enc_out[: bs * multi]             # [multi*bs, T, D]
             clean = enc_out[bs * multi : ]            # [   bs, T, D]
-
-            # detach clean so no grad flows back through it
-            clean = clean.detach()
         
             if hasattr(self.hparams, 'dirty_mse') and self.hparams.dirty_mse:
                 dirty1 = pred[:bs]
@@ -125,7 +122,7 @@ class ASR(sb.core.Brain):
 
             # compute KL‑divergence
             # KL(Q=clean ∥ P=dirty)
-            clean_internal_loss_mse = F.mse_loss(dirty, clean_rep, reduction="mean") 
+            clean_internal_loss_mse = F.mse_loss(dirty, clean_rep.detach(), reduction="mean") 
 
 
         # output layer for ctc log-probabilities
@@ -161,8 +158,6 @@ class ASR(sb.core.Brain):
                     dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty3), F.softmax(dirty2 ,dim=-1) , reduction="batchmean")
 
                     dirty_kl_loss = dirty_kl_loss / 6
-                # detach clean so no grad flows back through it
-                clean = clean.detach()
 
                 if hasattr(self.hparams, "usa_speed") and self.hparams.usa_speed:
                     # now make distributions
@@ -177,7 +172,7 @@ class ASR(sb.core.Brain):
 
                 # compute KL‑divergence
                 # KL(Q=clean ∥ P=dirty)
-                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
+                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep.detach(), reduction="batchmean") 
         # Compute outputs
         hyps = None
         current_epoch = self.hparams.epoch_counter.current
