@@ -85,14 +85,14 @@ class ASR_Brain(sb.Brain):
             use_softmax = softmax_no_mean
             use_logsoftmax = logsoftmax_no_mean
 
-            if hasattr(self.hparams, 'kl_mean_time_axis', False):
+            if getattr(self.hparams, 'kl_mean_time_axis', False):
                 use_softmax = softmax_mean
                 use_logsoftmax = logsoftmax_mean
             else:
                 use_softmax = softmax_no_mean
                 use_logsoftmax = logsoftmax_no_mean
 
-            if hasattr(self.hparams, 'kl_dirty', False):
+            if getattr(self.hparams, 'kl_dirty', False):
                 dirty1 = logits[:bs]
                 dirty2 = logits[bs:2*bs]
                 dirty3 = logits[2*bs:3*bs]
@@ -106,7 +106,7 @@ class ASR_Brain(sb.Brain):
 
                 dirty_kl_loss = dirty_kl_loss / 6
 
-            if hasattr(self.hparams, 'kl_clean') and self.hparams.kl_clean:
+            if getattr(self.hparams, 'kl_clean', False):
                 # now make distributions
                 dirty_logp = use_logsoftmax(dirty) # do log here --> `log P(x)`
                 clean_p = use_softmax(clean) # no log --> Q(x)
