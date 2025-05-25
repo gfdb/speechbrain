@@ -76,9 +76,6 @@ class ASR_Brain(sb.Brain):
             dirty = logits[: bs * multi]
             clean = logits[bs * multi : ]
 
-            # detach clean so no grad flows back through it
-            clean = clean.detach()
-
             logsoftmax_mean = lambda x: self.hparams.log_softmax(x).mean(dim=(1,2))
             logsoftmax_no_mean = lambda x: self.hparams.log_softmax(x)
             
@@ -88,14 +85,14 @@ class ASR_Brain(sb.Brain):
             use_softmax = softmax_no_mean
             use_logsoftmax = logsoftmax_no_mean
 
-            if hasattr(self.hparams, 'kl_mean_time_axis') and self.hparams.kl_mean_time_axis:
+            if hasattr(self.hparams, 'kl_mean_time_axis', False):
                 use_softmax = softmax_mean
                 use_logsoftmax = logsoftmax_mean
             else:
                 use_softmax = softmax_no_mean
                 use_logsoftmax = logsoftmax_no_mean
 
-            if hasattr(self.hparams, 'kl_dirty') and self.hparams.kl_dirty:
+            if hasattr(self.hparams, 'kl_dirty', False):
                 dirty1 = logits[:bs]
                 dirty2 = logits[bs:2*bs]
                 dirty3 = logits[2*bs:3*bs]
@@ -118,7 +115,8 @@ class ASR_Brain(sb.Brain):
 
                 # compute KL‑divergence
                 # KL(Q=clean ∥ P=dirty)
-                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
+                # detach clean so no grad flows back through it
+                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep.detach(), reduction="batchmean") 
 
 
         if stage == sb.Stage.VALID:
