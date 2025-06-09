@@ -96,43 +96,57 @@ class ASR(sb.core.Brain):
         clean_kl_loss = 0
         dirty_kl_loss = 0
         if stage == sb.Stage.TRAIN:
-            if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss:
-                bs = original_bs
-                multi = self.hparams.wav_augment.batch_multiplier
-                # total should be bs * (multi + 1)
-                assert pred.size(0) == bs * (multi + 1)
+            bs = original_bs
+            multi = self.hparams.wav_augment.batch_multiplier
+            # total should be bs * (multi + 1)
+            assert pred.size(0) == bs * (multi + 1)
 
-                dirty = pred[: bs * multi]             # [multi*bs, T, D]
-                clean = pred[bs * multi : ]            # [   bs, T, D]
+            dirty = pred[: bs * multi]             # [multi*bs, T, D]
+            clean = pred[bs * multi : ]            # [   bs, T, D]
 
-                if hasattr(self.hparams, 'dirty_kl_loss') and self.hparams.dirty_kl_loss:
-                    dirty1 = pred[:bs]
-                    dirty2 = pred[bs:2*bs]
-                    dirty3 = pred[2*bs:3*bs]
+            logsoftmax_mean = lambda x: self.hparams.log_softmax(x).mean(dim=1)
+            logsoftmax_no_mean = lambda x: self.hparams.log_softmax(x)
+            
+            softmax_mean = lambda x: F.softmax(x, dim=-1).mean(dim=1)
+            softmax_no_mean = lambda x: F.softmax(x, dim=-1)
 
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty1), F.softmax(dirty2 ,dim=-1) , reduction="batchmean")
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty1), F.softmax(dirty3,dim=-1) , reduction="batchmean")
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty2), F.softmax(dirty3 ,dim=-1) , reduction="batchmean")
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty2), F.softmax(dirty1 ,dim=-1) , reduction="batchmean")
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty3), F.softmax(dirty1 ,dim=-1) , reduction="batchmean")
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty3), F.softmax(dirty2 ,dim=-1) , reduction="batchmean")
+            use_softmax = softmax_no_mean
+            use_logsoftmax = logsoftmax_no_mean
 
-                    dirty_kl_loss = dirty_kl_loss / 6
+            if getattr(self.hparams, 'kl_mean_time_axis', False):
+                use_softmax = softmax_mean
+                use_logsoftmax = logsoftmax_mean
+            else:
+                use_softmax = softmax_no_mean
+                use_logsoftmax = logsoftmax_no_mean
 
-                if hasattr(self.hparams, "usa_speed") and self.hparams.usa_speed:
-                    # now make distributions
-                    dirty_logp = self.hparams.log_softmax(dirty) # do log here --> `log P(x)`
-                    clean_p = F.softmax(clean,  dim=-1) # no log --> Q(x)
-                else:
-                    dirty_logp = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
-                    clean_p = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
+            if getattr(self.hparams, 'kl_dirty', False):
+                dirty1 = pred[:bs]
+                dirty2 = pred[bs:2*bs]
+                dirty3 = pred[2*bs:3*bs]
 
-                # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty2), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty3), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty3), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty1), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty1), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty2), reduction="batchmean")
+
+                dirty_kl_loss = dirty_kl_loss / 6
+
+
+            if getattr(self.hparams, 'kl_clean', False):
+                # now make distributions
+                dirty_logp = use_logsoftmax(dirty) # do log here --> `log P(x)`
+                clean_p = use_softmax(clean) # no log --> Q(x)
+            
                 clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
 
                 # compute KL‑divergence
                 # KL(Q=clean ∥ P=dirty)
+                # detach clean so no grad flows back through it
                 clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep.detach(), reduction="batchmean") 
+
         # Compute outputs
         hyps = None
         current_epoch = self.hparams.epoch_counter.current
@@ -197,18 +211,12 @@ class ASR(sb.core.Brain):
             p_ctc, tokens, wav_lens, tokens_lens
         ).sum()
 
-        if stage == sb.Stage.TRAIN and getattr(self.hparams, "sim_loss", False):
-            if hasattr(self.hparams, "usa_speed") and self.hparams.usa_speed:
-                loss = (
-                    self.hparams.ctc_weight * loss_ctc
-                    + (1 - self.hparams.ctc_weight) * loss_seq
-                ) + clean_kl_loss * self.hparams.sim_loss_weight + self.hparams.dirty_kl_weight * dirty_kl_loss
-            else:
-                loss = (
-                    self.hparams.ctc_weight * loss_ctc
-                    + (1 - self.hparams.ctc_weight) * loss_seq
-                ) + clean_kl_loss * self.hparams.sim_loss_weight
-
+        if stage == sb.Stage.TRAIN:
+            loss_ctc = self.hparams.ctc_weight * loss_ctc
+            loss_seq = (1 - self.hparams.ctc_weight) * loss_seq
+            loss_clean_kl = clean_kl_loss * self.hparams.kl_clean_weight
+            loss_dirty_kl = dirty_kl_loss * self.hparams.kl_dirty_weight
+            loss = loss_ctc + loss_seq + loss_clean_kl + loss_dirty_kl
         else:
             loss = (
                 self.hparams.ctc_weight * loss_ctc

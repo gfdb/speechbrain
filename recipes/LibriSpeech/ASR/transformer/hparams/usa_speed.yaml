@@ -465,6 +465,14 @@ test_search: !new:speechbrain.decoders.S2STransformerBeamSearcher
     length_normalization: True
     scorer: !ref <scorer_test_search>
 
+kl_clean: False 
+kl_clean_weight: 0
+
+kl_dirty: False
+kl_dirty_weight: 0
+
+kl_mean_time_axis: False
+
 log_softmax: !new:torch.nn.LogSoftmax
     dim: -1
 
