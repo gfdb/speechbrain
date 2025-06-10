@@ -79,17 +79,11 @@ class ASR_Brain(sb.Brain):
             logsoftmax_mean = lambda x: self.hparams.log_softmax(x).mean(dim=(1,2))
             logsoftmax_no_mean = lambda x: self.hparams.log_softmax(x)
             
-            softmax_mean = lambda x: F.softmax(x, dim=-1).mean(dim=(1,2))
-            softmax_no_mean = lambda x: F.softmax(x, dim=-1)
-
-            use_softmax = softmax_no_mean
             use_logsoftmax = logsoftmax_no_mean
 
             if getattr(self.hparams, 'kl_mean_time_axis', False):
-                use_softmax = softmax_mean
                 use_logsoftmax = logsoftmax_mean
             else:
-                use_softmax = softmax_no_mean
                 use_logsoftmax = logsoftmax_no_mean
 
             if getattr(self.hparams, 'kl_dirty', False):
@@ -97,26 +91,26 @@ class ASR_Brain(sb.Brain):
                 dirty2 = logits[bs:2*bs]
                 dirty3 = logits[2*bs:3*bs]
 
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty2), reduction="batchmean")
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty3), reduction="batchmean")
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty3), reduction="batchmean")
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty1), reduction="batchmean")
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty1), reduction="batchmean")
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty2), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_logsoftmax(dirty2), reduction="batchmean", log_target = True)
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_logsoftmax(dirty3), reduction="batchmean", log_target = True)
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_logsoftmax(dirty3), reduction="batchmean", log_target = True)
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_logsoftmax(dirty1), reduction="batchmean", log_target = True)
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_logsoftmax(dirty1), reduction="batchmean", log_target = True)
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_logsoftmax(dirty2), reduction="batchmean", log_target = True)
 
                 dirty_kl_loss = dirty_kl_loss / 6
 
             if getattr(self.hparams, 'kl_clean', False):
                 # now make distributions
-                dirty_logp = use_logsoftmax(dirty) # do log here --> `log P(x)`
-                clean_p = use_softmax(clean) # no log --> Q(x)
+                dirty_logp = use_logsoftmax(dirty)
+                clean_p_log = use_logsoftmax(clean)
 
-                clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
+                clean_p_log_rep = clean_p_log.unsqueeze(0).repeat(multi, 1, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p_log.shape[1:])
 
                 # compute KL‑divergence
                 # KL(Q=clean ∥ P=dirty)
                 # detach clean so no grad flows back through it
-                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep.detach(), reduction="batchmean") 
+                clean_kl_loss = F.kl_div(dirty_logp, clean_p_log_rep.detach(), reduction="batchmean", log_target = True) 
 
 
         if stage == sb.Stage.VALID:
