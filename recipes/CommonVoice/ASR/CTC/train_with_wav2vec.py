@@ -348,8 +348,8 @@ def dataio_prepare(hparams, tokenizer):
             hparams["sample_rate"],
         )(sig)
         if "usa_speed" in hparams and hparams["usa_speed"] and "speed_perturb" in hparams:
-            spd_prob = 0.5 # probability to apply speed perturbation 
-            if torch.randn((1,)).item() > spd_prob:
+            spd_prob = 0.1574 # probability to apply speed perturbation 
+            if torch.randn((1,)).item() < spd_prob:
                 sig = hparams["speed_perturb"](sig.unsqueeze(0))
                 sig = sig.squeeze(0)
         return sig
