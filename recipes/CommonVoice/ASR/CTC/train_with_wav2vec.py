@@ -69,23 +69,29 @@ class ASR(sb.core.Brain):
 
         clean_kl_loss = 0
         dirty_kl_loss = 0
-        if stage == sb.Stage.TRAIN: 
+        if stage == sb.Stage.TRAIN:
             bs = original_bs
             multi = self.hparams.wav_augment.batch_multiplier
             # total should be bs * (multi + 1)
             assert logits.size(0) == bs * (multi + 1)
-            
-            dirty = logits[: bs * multi]
-            clean = logits[bs * multi : ]
 
-            logsoftmax_mean = lambda x: self.hparams.log_softmax_kl(x).mean(dim=1)
-            logsoftmax_no_mean = lambda x: self.hparams.log_softmax_kl(x)
+            dirty = logits[: bs * multi]             # [multi*bs, T, D]
+            clean = logits[bs * multi : ]            # [   bs, T, D]
+
+            logsoftmax_mean = lambda x: self.hparams.log_softmax(x).mean(dim=1)
+            logsoftmax_no_mean = lambda x: self.hparams.log_softmax(x)
             
+            softmax_mean = lambda x: F.softmax(x, dim=-1).mean(dim=1)
+            softmax_no_mean = lambda x: F.softmax(x, dim=-1)
+
+            use_softmax = softmax_no_mean
             use_logsoftmax = logsoftmax_no_mean
 
             if getattr(self.hparams, 'kl_mean_time_axis', False):
+                use_softmax = softmax_mean
                 use_logsoftmax = logsoftmax_mean
             else:
+                use_softmax = softmax_no_mean
                 use_logsoftmax = logsoftmax_no_mean
 
             if getattr(self.hparams, 'kl_dirty', False):
@@ -93,26 +99,28 @@ class ASR(sb.core.Brain):
                 dirty2 = logits[bs:2*bs]
                 dirty3 = logits[2*bs:3*bs]
 
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_logsoftmax(dirty2), reduction="batchmean", log_target = True)
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_logsoftmax(dirty3), reduction="batchmean", log_target = True)
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_logsoftmax(dirty3), reduction="batchmean", log_target = True)
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_logsoftmax(dirty1), reduction="batchmean", log_target = True)
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_logsoftmax(dirty1), reduction="batchmean", log_target = True)
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_logsoftmax(dirty2), reduction="batchmean", log_target = True)
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty2), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty3), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty3), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty1), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty1), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty2), reduction="batchmean")
 
                 dirty_kl_loss = dirty_kl_loss / 6
 
+
             if getattr(self.hparams, 'kl_clean', False):
                 # now make distributions
-                dirty_logp = use_logsoftmax(dirty)
-                clean_p_log = use_logsoftmax(clean)
-
-                clean_p_log_rep = clean_p_log.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p_log.shape[1:])
+                dirty_logp = use_logsoftmax(dirty) # do log here --> `log P(x)`
+                clean_p = use_softmax(clean) # no log --> Q(x)
+            
+                clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
 
                 # compute KL‑divergence
                 # KL(Q=clean ∥ P=dirty)
                 # detach clean so no grad flows back through it
-                clean_kl_loss = F.kl_div(dirty_logp, clean_p_log_rep.detach(), reduction="batchmean", log_target = True) 
+                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep.detach(), reduction="batchmean") 
+ 
 
         p_tokens = None
         if stage == sb.Stage.VALID:
