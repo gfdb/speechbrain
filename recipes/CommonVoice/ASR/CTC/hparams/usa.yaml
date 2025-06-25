@@ -253,6 +253,17 @@ batch_multiplier: 3
 concat_original: True
 aug_strategy: 'random'
 augment_device: 'cuda'
+
+kl_clean: False 
+kl_clean_weight: 0
+
+kl_dirty: False
+kl_dirty_weight: 0
+
+kl_mean_time_axis: False
+
+log_softmax_kl: !new:torch.nn.LogSoftmax
+    dim: -1
  
 wav_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     augmentations: [

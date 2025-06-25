@@ -27,6 +27,7 @@ import logging
 import sys
 
 import torch
+import torch.nn.functional as F
 import torchaudio
 from hyperpyyaml import load_hyperpyyaml
 
@@ -34,8 +35,6 @@ import speechbrain as sb
 from speechbrain.tokenizers.SentencePiece import SentencePiece
 from speechbrain.utils.data_utils import undo_padding
 from speechbrain.utils.distributed import if_main_process, run_on_main
-import torch.nn.functional as F
-
 
 logger = logging.getLogger(__name__)
 
@@ -67,29 +66,53 @@ class ASR(sb.core.Brain):
         logits = self.modules.ctc_lin(x)
         p_ctc = self.hparams.log_softmax(logits)
         
+
         clean_kl_loss = 0
-        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss: 
+        dirty_kl_loss = 0
+        if stage == sb.Stage.TRAIN: 
             bs = original_bs
             multi = self.hparams.wav_augment.batch_multiplier
             # total should be bs * (multi + 1)
             assert logits.size(0) == bs * (multi + 1)
-
+            
             dirty = logits[: bs * multi]
             clean = logits[bs * multi : ]
+
+            logsoftmax_mean = lambda x: self.hparams.log_softmax_kl(x).mean(dim=1)
+            logsoftmax_no_mean = lambda x: self.hparams.log_softmax_kl(x)
             
-            # detach clean so no grad flows back through it
-            clean = clean.detach()
+            use_logsoftmax = logsoftmax_no_mean
 
-            # now make distributions
-            dirty_logp = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
-            clean_p = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
+            if getattr(self.hparams, 'kl_mean_time_axis', False):
+                use_logsoftmax = logsoftmax_mean
+            else:
+                use_logsoftmax = logsoftmax_no_mean
 
-            # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
-            clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
+            if getattr(self.hparams, 'kl_dirty', False):
+                dirty1 = logits[:bs]
+                dirty2 = logits[bs:2*bs]
+                dirty3 = logits[2*bs:3*bs]
 
-            # compute KL‑divergence
-            # KL(Q=clean ∥ P=dirty)
-            clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_logsoftmax(dirty2), reduction="batchmean", log_target = True)
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_logsoftmax(dirty3), reduction="batchmean", log_target = True)
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_logsoftmax(dirty3), reduction="batchmean", log_target = True)
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_logsoftmax(dirty1), reduction="batchmean", log_target = True)
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_logsoftmax(dirty1), reduction="batchmean", log_target = True)
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_logsoftmax(dirty2), reduction="batchmean", log_target = True)
+
+                dirty_kl_loss = dirty_kl_loss / 6
+
+            if getattr(self.hparams, 'kl_clean', False):
+                # now make distributions
+                dirty_logp = use_logsoftmax(dirty)
+                clean_p_log = use_logsoftmax(clean)
+
+                clean_p_log_rep = clean_p_log.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p_log.shape[1:])
+
+                # compute KL‑divergence
+                # KL(Q=clean ∥ P=dirty)
+                # detach clean so no grad flows back through it
+                clean_kl_loss = F.kl_div(dirty_logp, clean_p_log_rep.detach(), reduction="batchmean", log_target = True) 
 
         p_tokens = None
         if stage == sb.Stage.VALID:
@@ -99,12 +122,12 @@ class ASR(sb.core.Brain):
         elif stage == sb.Stage.TEST:
             p_tokens = test_searcher(p_ctc, wav_lens)
 
-        return p_ctc, wav_lens, p_tokens, clean_kl_loss
+        return p_ctc, wav_lens, p_tokens, clean_kl_loss, dirty_kl_loss
 
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss (CTC) given predictions and targets."""
 
-        p_ctc, wav_lens, p_tokens, clean_kl_loss = predictions
+        p_ctc, wav_lens, p_tokens, clean_kl_loss, dirty_kl_loss = predictions
 
         ids = batch.id
         tokens_eos, tokens_eos_lens = batch.tokens_eos
@@ -125,10 +148,11 @@ class ASR(sb.core.Brain):
             tokens = self.hparams.fea_augment.replicate_labels(tokens)
             tokens_lens = self.hparams.fea_augment.replicate_labels(tokens_lens)
 
-        if stage == sb.Stage.TRAIN and getattr(self.hparams, "sim_loss", False):
+        if stage == sb.Stage.TRAIN:
             loss_ctc = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
-            loss_clean_kl = clean_kl_loss * self.hparams.sim_loss_weight
-            loss = loss_ctc + loss_clean_kl
+            loss_clean_kl = clean_kl_loss * self.hparams.kl_clean_weight
+            loss_dirty_kl = dirty_kl_loss * self.hparams.kl_dirty_weight
+            loss = loss_ctc + loss_clean_kl + loss_dirty_kl
         else:
             loss = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
         
