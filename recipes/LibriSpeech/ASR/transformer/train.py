@@ -40,11 +40,11 @@ import sys
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from hyperpyyaml import load_hyperpyyaml
 
 import speechbrain as sb
 from speechbrain.utils.distributed import if_main_process, run_on_main
-import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
@@ -396,8 +396,8 @@ def dataio_prepare(hparams):
         sig = sb.dataio.dataio.read_audio(wav)
 
         if "usa_speed" in hparams and hparams["usa_speed"] and "speed_perturb" in hparams:
-            spd_prob = 0.1574 # probability to apply speed perturbation 
-            if torch.randn((1,)).item() > spd_prob:
+            spd_prob = hparams['speed_prob'] # probability to apply speed perturbation 
+            if torch.randn((1,)).item() < spd_prob:
                 sig = hparams["speed_perturb"](sig.unsqueeze(0))
                 sig = sig.squeeze(0)
         return sig

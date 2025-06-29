@@ -254,6 +254,7 @@ concat_original: True
 aug_strategy: 'classic'
 augment_device: 'cuda'
 usa_speed: True
+speed_prob: 0.1574
 
 kl_clean: False 
 kl_clean_weight: 0

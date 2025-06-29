@@ -225,6 +225,7 @@ concat_original: True
 aug_strategy: 'classic'
 augment_device: 'cuda'
 usa_speed: True
+speed_prob: 0.1574
 
 wav_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     augmentations: [
