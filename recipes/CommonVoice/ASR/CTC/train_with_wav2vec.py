@@ -81,8 +81,8 @@ class ASR(sb.core.Brain):
             logsoftmax_mean = lambda x: self.hparams.log_softmax(x).mean(dim=1)
             logsoftmax_no_mean = lambda x: self.hparams.log_softmax(x)
             
-            softmax_mean = lambda x: F.softmax(x, dim=-1).mean(dim=1)
-            softmax_no_mean = lambda x: F.softmax(x, dim=-1)
+            softmax_mean = lambda x: torch.clamp(F.softmax(x, dim=-1).mean(dim=1), min=1e-8)
+            softmax_no_mean = lambda x: torch.clamp(F.softmax(x, dim=-1), min=1e-8)
 
             use_softmax = softmax_no_mean
             use_logsoftmax = logsoftmax_no_mean
