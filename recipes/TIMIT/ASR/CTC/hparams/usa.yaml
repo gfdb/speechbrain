@@ -91,6 +91,13 @@ normalize: !new:speechbrain.processing.features.InputNormalization
 
 # ----- WAVEFORM AUGMENTATION ----- #
 
+# Download and prepare the dataset of noisy sequences for augmentation
+prepare_noise_data: !name:speechbrain.augment.preparation.prepare_dataset_from_URL
+    URL: !ref <NOISE_DATASET_URL>
+    dest_folder: !ref <data_folder_noise>
+    ext: wav
+    csv_file: !ref <noise_annotation>
+
 # Add noise to input signal
 add_noise: !new:speechbrain.augment.time_domain.AddNoise
     csv_file: !ref <noise_annotation>
