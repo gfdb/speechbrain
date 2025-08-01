@@ -229,8 +229,8 @@ sign_flip: !new:speechbrain.augment.time_domain.SignFlip
 
 
 # ChunkSwap
-chunk_size_frac: 0.02
-num_chunks: 2
+chunk_size_frac: 0.01
+num_chunks: 4
 chunk_swap: !new:speechbrain.augment.time_domain.ChunkSwap
     num_chunks: !ref <num_chunks>
     chunk_size_frac: !ref <chunk_size_frac>
