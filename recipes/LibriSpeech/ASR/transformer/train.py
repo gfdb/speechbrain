@@ -98,11 +98,12 @@ class ASR(sb.core.Brain):
         if stage == sb.Stage.TRAIN:
             bs = original_bs
             multi = self.hparams.wav_augment.batch_multiplier
-            # total should be bs * (multi + 1)
-            assert pred.size(0) == bs * (multi + 1)
+            if multi > 1:
+                # total should be bs * (multi + 1)
+                assert pred.size(0) == bs * (multi + 1)
 
-            dirty = pred[: bs * multi]             # [multi*bs, T, D]
-            clean = pred[bs * multi : ]            # [   bs, T, D]
+                dirty = pred[: bs * multi]             # [multi*bs, T, D]
+                clean = pred[bs * multi : ]            # [   bs, T, D]
 
             logsoftmax_mean = lambda x: self.hparams.log_softmax(x).mean(dim=1)
             logsoftmax_no_mean = lambda x: self.hparams.log_softmax(x)
