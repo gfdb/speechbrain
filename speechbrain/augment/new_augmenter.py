@@ -20,6 +20,7 @@ class NewAugmenter(nn.Module):
             - If aug_strategy is "all", each batch copy gets all the augmentations applied sequentially, num_aug times,
                 per batch copy. 
             Defaults to "random".
+        aug_toggles (list, optional): A boolean list whose indices correspond to the indices in `augmentations` you would like to toggle on or off.
     """
     def __init__(
         self,
@@ -28,7 +29,8 @@ class NewAugmenter(nn.Module):
         num_aug: int = 1,
         batch_multiplier: int = 0,
         concat_original: bool = False,
-        aug_strategy: str = "random"  # "random" or "all"
+        aug_strategy: str = "random",  # "random" or "all"
+        aug_toggles: list = None
     ):
         super().__init__()
         self.min_num_aug = min_num_aug
@@ -37,7 +39,16 @@ class NewAugmenter(nn.Module):
         self.augmentations = augmentations
         self.concat_original = concat_original
         self.aug_strategy = aug_strategy.lower()
+        self.aug_toggles = aug_toggles
+        
+        if self.aug_toggles is not None and len(self.aug_toggles) > 0:
             
+            if len(self.aug_toggles) != len(self.augmentations):
+                raise ValueError('augmentations and aug_toggles should have the same length.')
+
+            self.augmentations = [aug for aug, keep in zip(self.augmentations, self.aug_toggles) if keep]
+
+
 
         # check which augmentation functions require lengths argument
         self.require_lengths = {}
