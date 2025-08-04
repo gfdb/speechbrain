@@ -1,8 +1,10 @@
+import inspect
+
 import torch
 import torch.nn as nn
-import inspect
-from speechbrain.utils.callchains import lengths_arg_exists
 import torch.nn.functional as F
+
+from speechbrain.utils.callchains import lengths_arg_exists
 
 
 class NewAugmenter(nn.Module):
