@@ -235,7 +235,8 @@ if __name__ == "__main__":
             "uppercase": hparams["uppercase"],
         },
     )
-    run_on_main(hparams["prepare_noise_data"])
+    if hasattr(hparams, "prepare_noise_data"):
+        run_on_main(hparams["prepare_noise_data"])
 
     # Dataset IO prep: creating Dataset objects and proper encodings for phones
     train_data, valid_data, test_data, label_encoder = dataio_prep(hparams)
