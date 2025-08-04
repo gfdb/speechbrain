@@ -27,7 +27,7 @@ noise_annotation: !ref <save_folder>/noise.csv #The data manifest files are crea
 
 ####################### Training Parameters ####################################
 number_of_epochs: 50
-batch_size: 8
+batch_size: 16
 lr: 1.0
 sorting: ascending # choose between ascending, descending and random
 
