@@ -36,17 +36,17 @@ Authors
 
 import logging
 import os
+import random
 import sys
 from pathlib import Path
 
 import torch
-import random
+import torch.nn.functional as F
 from hyperpyyaml import load_hyperpyyaml
 
 import speechbrain as sb
-from speechbrain.utils.distributed import if_main_process, run_on_main
-import torch.nn.functional as F
 from speechbrain.dataio.dataset import FilteredSortedDynamicItemDataset
+from speechbrain.utils.distributed import if_main_process, run_on_main
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class ASR(sb.core.Brain):
         )
 
         # 32, ..., ...
-        clean_internal_loss_cosine = 0
+        clean_cosine_loss = 0
         dirty_cosine_loss = 0
         if stage == sb.Stage.TRAIN:
             bs = original_bs
@@ -100,14 +100,14 @@ class ASR(sb.core.Brain):
             # total should be bs * (multi + 1)
             assert enc_out.size(0) == bs * (multi + 1)
         
-            dirty = enc_out[: bs * multi]             # [multi*bs, T, D]
-            clean = enc_out[bs * multi : ]            # [   bs, T, D]
+            dirty = enc_out[: bs * multi]   # [multi*bs, T, D]
+            clean = enc_out[bs * multi : ]  # [   bs, T, D]
             print('dirty:', dirty.shape)
             print('clean:',clean.shape)
             # detach clean so no grad flows back through it
             clean = clean.detach()
 
-            if hasattr(self.hparams, 'dirty_cosine_loss') and self.hparams.dirty_cosine_loss:
+            if getattr(self.hparams, 'dirty_cosine', False):
                 dirty1 = pred[:bs]
                 dirty2 = pred[bs:2*bs]
                 dirty3 = pred[2*bs:3*bs]
@@ -121,13 +121,14 @@ class ASR(sb.core.Brain):
 
                 dirty_cosine_loss = dirty_cosine_loss / 6
                 dirty_cosine_loss = 1 - dirty_cosine_loss.mean()
-             # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
-            clean_rep = clean.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean.shape[1:])
 
-            # compute KL‑divergence
-            # KL(Q=clean ∥ P=dirty)
-            clean_internal_loss_cosine = 1 - F.cosine_similarity(dirty, clean_rep, dim=-1).mean()
-            print('cosine sim:', clean_internal_loss_cosine)
+            if getattr(self.hparams, 'clean_cosine', False):
+                # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
+                clean_rep = clean.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean.shape[1:])
+                # compute cosine sim
+                # detach clean so no grad flows back through it
+                clean_cosine_loss = 1 - F.cosine_similarity(dirty, clean_rep.detach(), dim=-1).mean()
+                print('cosine sim:', clean_cosine_loss)
 
 
         # output layer for ctc log-probabilities
@@ -141,43 +142,56 @@ class ASR(sb.core.Brain):
         clean_kl_loss = 0
         dirty_kl_loss = 0
         if stage == sb.Stage.TRAIN:
-            if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss:
-                bs = original_bs
-                multi = self.hparams.wav_augment.batch_multiplier
-                # total should be bs * (multi + 1)
-                assert pred.size(0) == bs * (multi + 1)
+            bs = original_bs
+            multi = self.hparams.wav_augment.batch_multiplier
+            # total should be bs * (multi + 1)
+            assert pred.size(0) == bs * (multi + 1)
 
-                dirty = pred[: bs * multi]             # [multi*bs, T, D]
-                clean = pred[bs * multi : ]            # [   bs, T, D]
+            dirty = pred[: bs * multi]  # [multi*bs, T, D]
+            clean = pred[bs * multi : ] # [   bs, T, D]
 
-                if hasattr(self.hparams, 'dirty_kl_loss') and self.hparams.dirty_kl_loss:
-                    dirty1 = pred[:bs]
-                    dirty2 = pred[bs:2*bs]
-                    dirty3 = pred[2*bs:3*bs]
-                    
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty1), F.softmax(dirty2 ,dim=-1) , reduction="batchmean")
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty1), F.softmax(dirty3,dim=-1) , reduction="batchmean")
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty2), F.softmax(dirty3 ,dim=-1) , reduction="batchmean")
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty2), F.softmax(dirty1 ,dim=-1) , reduction="batchmean")
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty3), F.softmax(dirty1 ,dim=-1) , reduction="batchmean")
-                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty3), F.softmax(dirty2 ,dim=-1) , reduction="batchmean")
+            logsoftmax_mean = lambda x: self.hparams.log_softmax(x).mean(dim=1)
+            logsoftmax_no_mean = lambda x: self.hparams.log_softmax(x)
+            
+            softmax_mean = lambda x: F.softmax(x, dim=-1).mean(dim=1)
+            softmax_no_mean = lambda x: F.softmax(x, dim=-1)
 
-                    dirty_kl_loss = dirty_kl_loss / 6
+            use_softmax = softmax_no_mean
+            use_logsoftmax = logsoftmax_no_mean
 
-                if hasattr(self.hparams, "usa_speed") and self.hparams.usa_speed:
-                    # now make distributions
-                    dirty_logp = self.hparams.log_softmax(dirty) # do log here --> `log P(x)`
-                    clean_p = F.softmax(clean,  dim=-1) # no log --> Q(x)
-                else:
-                    dirty_logp = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
-                    clean_p = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
+            if getattr(self.hparams, 'kl_mean_time_axis', False):
+                use_softmax = softmax_mean
+                use_logsoftmax = logsoftmax_mean
+            else:
+                use_softmax = softmax_no_mean
+                use_logsoftmax = logsoftmax_no_mean
 
-                # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
+            if getattr(self.hparams, 'kl_dirty', False):
+                dirty1 = pred[:bs]
+                dirty2 = pred[bs:2*bs]
+                dirty3 = pred[2*bs:3*bs]
+
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty2), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty3), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty3), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty1), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty1), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty2), reduction="batchmean")
+
+                dirty_kl_loss = dirty_kl_loss / 6
+
+            if getattr(self.hparams, 'kl_clean', False):
+                # now make distributions
+                dirty_logp = use_logsoftmax(dirty) # do log here --> `log P(x)`
+                clean_p = use_softmax(clean) # no log --> Q(x)
+            
                 clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
 
                 # compute KL‑divergence
                 # KL(Q=clean ∥ P=dirty)
+                # detach clean so no grad flows back through it
                 clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep.detach(), reduction="batchmean") 
+
         # Compute outputs
         hyps = None
         current_epoch = self.hparams.epoch_counter.current
@@ -201,12 +215,12 @@ class ASR(sb.core.Brain):
                     enc_out.detach(), wav_lens
                 )
 
-        return p_ctc, p_seq, wav_lens, hyps, clean_kl_loss, dirty_kl_loss, clean_internal_loss_cosine, dirty_cosine_loss
+        return p_ctc, p_seq, wav_lens, hyps, clean_kl_loss, dirty_kl_loss, clean_cosine_loss, dirty_cosine_loss
 
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss (CTC+NLL) given predictions and targets."""
 
-        (p_ctc, p_seq, wav_lens, hyps, clean_kl_loss, dirty_kl_loss, clean_internal_loss_cosine, dirty_cosine_loss) = predictions
+        (p_ctc, p_seq, wav_lens, hyps, clean_kl_loss, dirty_kl_loss, clean_cosine_loss, dirty_cosine_loss) = predictions
 
         ids = batch.id
         tokens_eos, tokens_eos_lens = batch.tokens_eos
@@ -243,24 +257,18 @@ class ASR(sb.core.Brain):
         ).sum()
 
         if stage == sb.Stage.TRAIN:
-            if hasattr(self.hparams, "usa_speed") and self.hparams.usa_speed:
-                loss = (
-                    self.hparams.ctc_weight * loss_ctc * 0
-                    + (1 - self.hparams.ctc_weight) * loss_seq * 0
-                ) + (clean_kl_loss * self.hparams.sim_loss_weight
-                ) + (self.hparams.dirty_kl_weight * dirty_kl_loss
-                ) + (self.hparams.clean_cosine_weight * clean_internal_loss_cosine
-                ) + (self.hparams.dirty_cosine_weight * dirty_cosine_loss
-                )
-                print('ctc:', loss_ctc)
-                print('seq:', loss_seq)
-                print('kl clean:', clean_kl_loss)
-                print('kl dirty:', dirty_kl_loss)
-                print('cosine clean:', clean_internal_loss_cosine)
-                print('cosine weight:', self.hparams.clean_cosine_weight)
-                print('dirty cosine:', dirty_cosine_loss)
+            loss_ctc = self.hparams.ctc_weight * loss_ctc
+            loss_seq = (1 - self.hparams.ctc_weight) * loss_seq
+            loss_clean_kl = clean_kl_loss * self.hparams.kl_clean_weight
+            loss_dirty_kl = dirty_kl_loss * self.hparams.kl_dirty_weight
+            loss_clean_cosine = clean_cosine_loss * self.hparams.cosine_clean_weight
+            loss_dirty_cosine = dirty_cosine_loss * self.hparams.cosine_dirty_weight
+            loss = loss_ctc + loss_seq + loss_clean_kl + loss_dirty_kl + loss_clean_cosine + loss_dirty_cosine
         else:
-            loss = (self.hparams.ctc_weight * loss_ctc + (1 - self.hparams.ctc_weight) * loss_seq)
+            loss = (
+                self.hparams.ctc_weight * loss_ctc
+                + (1 - self.hparams.ctc_weight) * loss_seq
+            )
         
 
         if stage != sb.Stage.TRAIN:
@@ -438,7 +446,7 @@ def dataio_prepare(hparams):
         sig = sb.dataio.dataio.read_audio(wav)
 
         if "usa_speed" in hparams and hparams["usa_speed"] and "speed_perturb" in hparams:
-            spd_prob = 0.1574 # probability to apply speed perturbation 
+            spd_prob = 0.1574 # probability to apply speed perturbation
             if torch.randn((1,)).item() > spd_prob:
                 sig = hparams["speed_perturb"](sig.unsqueeze(0))
                 sig = sig.squeeze(0)
