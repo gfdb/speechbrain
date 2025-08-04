@@ -51,7 +51,6 @@ class NewAugmenter(nn.Module):
             self.augmentations = [aug for aug, keep in zip(self.augmentations, self.aug_toggles) if keep]
 
 
-
         # check which augmentation functions require lengths argument
         self.require_lengths = {}
         for i, aug in enumerate(self.augmentations):
@@ -74,6 +73,9 @@ class NewAugmenter(nn.Module):
         """
         device = x.device
         original_bs = x.shape[0]
+
+        if not self.augmentations:
+            return x, lengths
 
         # create list of batch copies
         batch_copies = []
