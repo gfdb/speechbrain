@@ -28,7 +28,7 @@ noise_annotation: !ref <save_folder>/noise.csv #The data manifest files are crea
 ####################### Training Parameters ####################################
 number_of_epochs: 50
 batch_size: 16
-lr: 1.0
+lr: 0.0001
 sorting: ascending # choose between ascending, descending and random
 
 # Feature parameters
@@ -74,7 +74,7 @@ normalize: !new:speechbrain.processing.features.InputNormalization
 # Time drop (T = 100 frames)
 time_drop: !new:speechbrain.augment.freq_domain.SpectrogramDrop
     drop_length_low: 100
-    drop_length_high: 100
+    drop_length_high: 101
     drop_count_low: 1
     drop_count_high: 1
 
@@ -152,10 +152,9 @@ output: !new:speechbrain.nnet.linear.Linear
 log_softmax: !new:speechbrain.nnet.activations.Softmax
     apply_log: True
 
-opt_class: !name:torch.optim.Adadelta
-    rho: 0.95
+opt_class: !name:torch.optim.AdamW
     lr: !ref <lr>
-    eps: 1.e-8
+    betas: (0.9,0.95)
 
 lr_annealing: !new:speechbrain.nnet.schedulers.NewBobScheduler
     initial_value: !ref <lr>
