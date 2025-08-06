@@ -1,11 +1,13 @@
 import inspect
 
+import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from speechbrain.utils.callchains import lengths_arg_exists
 
+logger = logging.getLogger(__name__)
 
 class NewAugmenter(nn.Module):
     """A memory-efficient faster implementation for batch augmentation.
