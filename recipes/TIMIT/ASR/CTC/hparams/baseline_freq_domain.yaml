@@ -150,6 +150,7 @@ log_softmax: !new:speechbrain.nnet.activations.Softmax
 opt_class: !name:torch.optim.AdamW
     lr: !ref <lr>
     betas: (0.9,0.95)
+    weight_decay: 0.02
 
 lr_annealing: !new:speechbrain.nnet.schedulers.NoamScheduler
     lr_initial: !ref <lr>
