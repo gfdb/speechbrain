@@ -88,10 +88,12 @@ class ASR_Brain(sb.Brain):
             per = self.per_metrics.summarize("error_rate")
 
         if stage == sb.Stage.VALID:
-            old_lr, new_lr = self.hparams.lr_annealing(per)
-            sb.nnet.schedulers.update_learning_rate(self.optimizer, new_lr)
+            lr = self.hparams.lr_annealing.current_lr
+            steps = self.optimizer_step
+            optim = self.optimizer.__class__.__name__
+
             self.hparams.train_logger.log_stats(
-                stats_meta={"epoch": epoch, "lr": old_lr},
+                stats_meta={"epoch": epoch, "lr": lr, "steps": steps, "optimizer": optim},
                 train_stats={"loss": self.train_loss},
                 valid_stats={"loss": stage_loss, "PER": per},
             )
@@ -115,7 +117,10 @@ class ASR_Brain(sb.Brain):
                         "CTC and PER stats written to ",
                         self.hparams.test_wer_file,
                     )
-
+    def on_fit_batch_end(self, batch, outputs, loss, should_step):
+        """At the end of the optimizer step, apply noam annealing."""
+        if should_step:
+            self.hparams.lr_annealing(self.optimizer)
 
 def dataio_prep(hparams):
     "Creates the datasets and their data processing pipelines."
