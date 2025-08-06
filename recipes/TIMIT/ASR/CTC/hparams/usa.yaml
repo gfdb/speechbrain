@@ -48,7 +48,7 @@ babble_snr_high: 20  # Max SNR for babble (batch sum noise)
 ####################### Training Parameters ####################################
 number_of_epochs: 50
 batch_size: 16
-lr: 1.0
+lr: 1e-3
 sorting: ascending # choose between ascending, descending and random
 
 # Feature parameters
@@ -137,7 +137,6 @@ rand_amp: !new:speechbrain.augment.time_domain.RandAmp
     amp_low: !ref <amp_low>
     amp_high: !ref <amp_high>
 
-
 # SignFlip
 sign_flip_prob: 0.6
 sign_flip: !new:speechbrain.augment.time_domain.SignFlip
@@ -217,16 +216,14 @@ output: !new:speechbrain.nnet.linear.Linear
 log_softmax: !new:speechbrain.nnet.activations.Softmax
     apply_log: True
 
-opt_class: !name:torch.optim.Adadelta
-    rho: 0.95
+opt_class: !name:torch.optim.AdamW
     lr: !ref <lr>
-    eps: 1.e-8
+    betas: (0.9,0.95)
+    weight_decay: 0.02
 
-lr_annealing: !new:speechbrain.nnet.schedulers.NewBobScheduler
-    initial_value: !ref <lr>
-    improvement_threshold: 0.0025
-    annealing_factor: 0.8
-    patient: 0
+lr_annealing: !new:speechbrain.nnet.schedulers.NoamScheduler
+    lr_initial: !ref <lr>
+    n_warmup_steps: 400
 
 modules:
     model: !ref <model>
