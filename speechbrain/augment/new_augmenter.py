@@ -76,6 +76,10 @@ class NewAugmenter(nn.Module):
         device = x.device
         original_bs = x.shape[0]
 
+        if not self.augmentations and self.concat_original:
+            out = torch.cat([x, x], dim=0)
+            out_lens = torch.cat([lengths, lengths], dim=0)
+            return out, out_lens
         if not self.augmentations:
             return x, lengths
 

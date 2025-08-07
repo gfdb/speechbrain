@@ -23,7 +23,7 @@ uppercase: False # Must be True when the TIMIT dataset is in the upper-case vers
 ####################### Training Parameters ####################################
 number_of_epochs: 50
 batch_size: 16
-lr: 0.0001
+lr: 0.001
 sorting: ascending # choose between ascending, descending and random
 
 # Feature parameters
