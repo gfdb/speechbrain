@@ -69,7 +69,14 @@ LANGUAGES = [
 ]
 
 
-def prepare_common_language(data_folder, save_folder, skip_prep=False):
+def prepare_common_language(
+    data_folder,
+    save_folder,
+    train_csv_file=None,
+    dev_csv_file=None,
+    test_csv_file=None,
+    skip_prep=False
+):
     """
     Prepares the csv files for the CommonLanguage dataset for LID.
     Download: https://www.dropbox.com/s/qqpmqay3q9xb1vf/common_voice_kpd.tar.gz?dl=0
@@ -81,6 +88,12 @@ def prepare_common_language(data_folder, save_folder, skip_prep=False):
         This path should include the multi: /datasets/CommonLanguage
     save_folder : str
         The directory where to store the csv files.
+    train_csv_file : str, optional
+        Path to the Train Common Language .csv file
+    dev_csv_file : str, optional
+        Path to the Dev Common Language .csv file
+    test_csv_file : str, optional
+        Path to the Test Common Language .csv file
     skip_prep: bool
         If True, skip data preparation.
 
@@ -102,6 +115,22 @@ def prepare_common_language(data_folder, save_folder, skip_prep=False):
 
     if skip_prep:
         return
+    
+    # If not specified point toward standard location w.r.t CommonVoice tree
+    if train_csv_file is None:
+        train_csv_file = data_folder + "/train.csv"
+    else:
+        train_csv_file = train_csv_file
+
+    if dev_csv_file is None:
+        dev_csv_file = data_folder + "/dev.csv"
+    else:
+        dev_csv_file = dev_csv_file
+
+    if test_csv_file is None:
+        test_csv_file = data_folder + "/test.csv"
+    else:
+        test_csv_file = test_csv_file
 
     # Setting the save folder
     os.makedirs(save_folder, exist_ok=True)
@@ -132,6 +161,12 @@ def prepare_common_language(data_folder, save_folder, skip_prep=False):
     # Create the signal list of train, dev, and test sets.
     data_split = create_sets(data_folder, extension)
 
+    # Creating csv files for {train, dev, test} data
+    file_pairs = zip(
+        [train_csv_file, dev_csv_file, test_csv_file],
+        [save_csv_train, save_csv_dev, save_csv_test],
+    )
+    
     # Creating csv files for training, dev and test data
     create_csv(wav_list=data_split["train"], csv_file=save_csv_train)
     create_csv(wav_list=data_split["dev"], csv_file=save_csv_dev)
