@@ -34,19 +34,19 @@ Authors
  * Titouan Parcollet 2021, 2022
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
 
 import torch
-import torch.nn.functional as F
 from hyperpyyaml import load_hyperpyyaml
 
 import speechbrain as sb
 from speechbrain.utils.distributed import if_main_process, run_on_main
-from speechbrain.utils.logger import get_logger
+import torch.nn.functional as F
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 # Define training procedure
@@ -60,7 +60,9 @@ class ASR(sb.core.Brain):
         original_bs = wavs.shape[0]
 
         # Add waveform augmentation if specified.
-        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment") and (
+            not hasattr(self.hparams, "augment_device") or self.hparams.augment_device == "cuda"
+        ):
             wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
             tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
                 
@@ -70,7 +72,9 @@ class ASR(sb.core.Brain):
         feats = self.modules.normalize(feats, wav_lens, epoch=current_epoch)
 
         # Add feature augmentation if specified.
-        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment") and (
+            not hasattr(self.hparams, "augment_device") or self.hparams.augment_device == "cuda"
+        ):
             feats, wav_lens = self.hparams.fea_augment(feats, wav_lens)
             tokens_bos = self.hparams.fea_augment.replicate_labels(tokens_bos)
         
@@ -80,6 +84,33 @@ class ASR(sb.core.Brain):
         enc_out, pred = self.modules.Transformer(
             src, tokens_bos, wav_lens, pad_idx=self.hparams.pad_index
         )
+
+        # 32, ..., ...
+        clean_internal_loss_mse = 0
+        if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss:
+            bs = original_bs
+            multi = self.hparams.wav_augment.batch_multiplier
+            # total should be bs * (multi + 1)
+            assert pred.size(0) == bs * (multi + 1)
+
+            dirty = pred[: bs * multi]             # [multi*bs, T, D]
+            clean = pred[bs * multi : ]            # [   bs, T, D]
+
+            # detach clean so no grad flows back through it
+            clean = clean.detach()
+
+            # now make distributions
+            # dirty_logp = self.hparams.log_softmax(dirty) # do log here --> `log P(x)`
+            # clean_p = F.softmax(clean,  dim=-1) # no log --> Q(x)
+
+
+            # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
+            clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
+
+            # compute KL‑divergence
+            # KL(Q=clean ∥ P=dirty)
+            clean_internal_loss_mse = F.mse_loss(dirty_logp, clean_p_rep, reduction="batchmean") 
+
 
         # output layer for ctc log-probabilities
         logits = self.modules.ctc_lin(enc_out)
@@ -92,58 +123,45 @@ class ASR(sb.core.Brain):
         clean_kl_loss = 0
         dirty_kl_loss = 0
         if stage == sb.Stage.TRAIN:
-            bs = original_bs
-            multi = self.hparams.wav_augment.batch_multiplier
-            if multi > 1:
+            if hasattr(self.hparams, "sim_loss") and self.hparams.sim_loss:
+                bs = original_bs
+                multi = self.hparams.wav_augment.batch_multiplier
                 # total should be bs * (multi + 1)
                 assert pred.size(0) == bs * (multi + 1)
 
                 dirty = pred[: bs * multi]             # [multi*bs, T, D]
                 clean = pred[bs * multi : ]            # [   bs, T, D]
 
-            logsoftmax_mean = lambda x: self.hparams.log_softmax(x).mean(dim=1)
-            logsoftmax_no_mean = lambda x: self.hparams.log_softmax(x)
-            
-            softmax_mean = lambda x: F.softmax(x, dim=-1).mean(dim=1)
-            softmax_no_mean = lambda x: F.softmax(x, dim=-1)
+                if hasattr(self.hparams, 'dirty_kl_loss') and self.hparams.dirty_kl_loss:
+                    dirty1 = pred[:bs]
+                    dirty2 = pred[bs:2*bs]
+                    dirty3 = pred[2*bs:3*bs]
 
-            use_softmax = softmax_no_mean
-            use_logsoftmax = logsoftmax_no_mean
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty1), F.softmax(dirty2 ,dim=-1) , reduction="batchmean")
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty1), F.softmax(dirty3,dim=-1) , reduction="batchmean")
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty2), F.softmax(dirty3 ,dim=-1) , reduction="batchmean")
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty2), F.softmax(dirty1 ,dim=-1) , reduction="batchmean")
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty3), F.softmax(dirty1 ,dim=-1) , reduction="batchmean")
+                    dirty_kl_loss += F.kl_div(self.hparams.log_softmax(dirty3), F.softmax(dirty2 ,dim=-1) , reduction="batchmean")
 
-            if getattr(self.hparams, 'kl_mean_time_axis', False):
-                use_softmax = softmax_mean
-                use_logsoftmax = logsoftmax_mean
-            else:
-                use_softmax = softmax_no_mean
-                use_logsoftmax = logsoftmax_no_mean
+                    dirty_kl_loss = dirty_kl_loss / 6
+                # detach clean so no grad flows back through it
+                clean = clean.detach()
 
-            if getattr(self.hparams, 'kl_dirty', False):
-                dirty1 = pred[:bs]
-                dirty2 = pred[bs:2*bs]
-                dirty3 = pred[2*bs:3*bs]
+                if hasattr(self.hparams, "usa_speed") and self.hparams.usa_speed:
+                    # now make distributions
+                    dirty_logp = self.hparams.log_softmax(dirty) # do log here --> `log P(x)`
+                    clean_p = F.softmax(clean,  dim=-1) # no log --> Q(x)
+                else:
+                    dirty_logp = self.hparams.log_softmax(dirty).mean(dim=1) # do log here --> `log P(x)`
+                    clean_p = F.softmax(clean,  dim=-1).mean(dim=1) # no log --> Q(x)
 
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty2), reduction="batchmean")
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty3), reduction="batchmean")
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty3), reduction="batchmean")
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty1), reduction="batchmean")
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty1), reduction="batchmean")
-                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty2), reduction="batchmean")
-
-                dirty_kl_loss = dirty_kl_loss / 6
-
-
-            if getattr(self.hparams, 'kl_clean', False):
-                # now make distributions
-                dirty_logp = use_logsoftmax(dirty) # do log here --> `log P(x)`
-                clean_p = use_softmax(clean) # no log --> Q(x)
-            
+                # clean: [bs, T, D] → [multi, bs, T, D] → [bs * multi, T, D]
                 clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
 
                 # compute KL‑divergence
                 # KL(Q=clean ∥ P=dirty)
-                # detach clean so no grad flows back through it
-                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep.detach(), reduction="batchmean") 
-
+                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep, reduction="batchmean") 
         # Compute outputs
         hyps = None
         current_epoch = self.hparams.epoch_counter.current
@@ -167,41 +185,37 @@ class ASR(sb.core.Brain):
                     enc_out.detach(), wav_lens
                 )
 
-        return p_ctc, p_seq, wav_lens, hyps, clean_kl_loss, dirty_kl_loss
+        return p_ctc, p_seq, wav_lens, hyps, clean_kl_loss, dirty_kl_loss, clean_internal_loss_mse
 
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss (CTC+NLL) given predictions and targets."""
 
-        (p_ctc, p_seq, wav_lens, hyps, clean_kl_loss, dirty_kl_loss) = predictions
+        (p_ctc, p_seq, wav_lens, hyps, clean_kl_loss, dirty_kl_loss, clean_internal_loss_mse) = predictions
 
         ids = batch.id
         tokens_eos, tokens_eos_lens = batch.tokens_eos
         tokens, tokens_lens = batch.tokens
 
         if stage == sb.Stage.TRAIN:
-            # Labels must be extended if parallel augmentation or concatenated
-            # augmentation was performed on the input (increasing the time dimension)
-            augment_warmup = 0
-
             augment_type = None
             if hasattr(self.hparams, "wav_augment"):
                 augment_type = "wav_augment"
             if hasattr(self.hparams, "fea_augment"):
                 augment_type = "fea_augment"
-
-            if hasattr(self.hparams, "augment_warmup"):
-                augment_warmup = self.hparams.augment_warmup
-            if (
-                augment_type is not None
-                and self.optimizer_step > augment_warmup
+            
+            if augment_type is not None and (
+                not hasattr(self.hparams, "augment_device") or self.hparams.augment_device == "cuda"
             ):
-                (
-                    tokens,
-                    tokens_lens,
-                    tokens_eos,
-                    tokens_eos_lens,
-                ) = self.hparams.fea_augment.replicate_multiple_labels(
-                    tokens, tokens_lens, tokens_eos, tokens_eos_lens
+                augment_obj = getattr(self.hparams, augment_type)
+                tokens = augment_obj.replicate_labels(tokens)
+                tokens_lens = augment_obj.replicate_labels(
+                    tokens_lens
+                )
+                tokens_eos = augment_obj.replicate_labels(
+                    tokens_eos
+                )
+                tokens_eos_lens = augment_obj.replicate_labels(
+                    tokens_eos_lens
                 )
         
         loss_seq = self.hparams.seq_cost(
@@ -212,17 +226,19 @@ class ASR(sb.core.Brain):
             p_ctc, tokens, wav_lens, tokens_lens
         ).sum()
 
-        if stage == sb.Stage.TRAIN:
-            loss_ctc = self.hparams.ctc_weight * loss_ctc
-            loss_seq = (1 - self.hparams.ctc_weight) * loss_seq
-            loss_clean_kl = clean_kl_loss * self.hparams.kl_clean_weight
-            loss_dirty_kl = dirty_kl_loss * self.hparams.kl_dirty_weight
-            loss = loss_ctc + loss_seq + loss_clean_kl + loss_dirty_kl
-        else:
-            loss = (
-                self.hparams.ctc_weight * loss_ctc
-                + (1 - self.hparams.ctc_weight) * loss_seq
-            )
+        if stage == sb.Stage.TRAIN and getattr(self.hparams, "sim_loss", False):
+            if hasattr(self.hparams, "usa_speed") and self.hparams.usa_speed:
+                loss = (
+                    self.hparams.ctc_weight * loss_ctc
+                    + (1 - self.hparams.ctc_weight) * loss_seq
+                ) + (clean_kl_loss * self.hparams.sim_loss_weight
+                ) + (self.hparams.dirty_kl_weight * dirty_kl_loss
+                ) + (self.hparams.clean_mse_weight) * clean_internal_loss_mse
+            else:
+                loss = (
+                    self.hparams.ctc_weight * loss_ctc
+                    + (1 - self.hparams.ctc_weight) * loss_seq
+                )
 
         
 
@@ -309,9 +325,7 @@ class ASR(sb.core.Brain):
                 test_stats=stage_stats,
             )
             if if_main_process():
-                with open(
-                    self.hparams.test_wer_file, "w", encoding="utf-8"
-                ) as w:
+                with open(self.hparams.test_wer_file, "w") as w:
                     self.wer_metric.write_stats(w)
 
             # save the averaged checkpoint at the end of the evaluation stage
@@ -399,8 +413,8 @@ def dataio_prepare(hparams):
         sig = sb.dataio.dataio.read_audio(wav)
 
         if "usa_speed" in hparams and hparams["usa_speed"] and "speed_perturb" in hparams:
-            spd_prob = hparams['speed_prob'] # probability to apply speed perturbation 
-            if torch.randn((1,)).item() < spd_prob:
+            spd_prob = 0.1574 # probability to apply speed perturbation 
+            if torch.randn((1,)).item() > spd_prob:
                 sig = hparams["speed_perturb"](sig.unsqueeze(0))
                 sig = sig.squeeze(0)
         return sig
@@ -464,7 +478,7 @@ def dataio_prepare(hparams):
 if __name__ == "__main__":
     # CLI:
     hparams_file, run_opts, overrides = sb.parse_arguments(sys.argv[1:])
-    with open(hparams_file, encoding="utf-8") as fin:
+    with open(hparams_file) as fin:
         hparams = load_hyperpyyaml(fin, overrides)
 
     # create ddp_group with the right communication protocol
@@ -512,7 +526,7 @@ if __name__ == "__main__":
 
     # We download the pretrained LM from HuggingFace (or elsewhere depending on
     # the path given in the YAML file). The tokenizer is loaded at the same time.
-    hparams["pretrainer"].collect_files()
+    run_on_main(hparams["pretrainer"].collect_files)
     hparams["pretrainer"].load_collected()
 
     # Trainer initialization

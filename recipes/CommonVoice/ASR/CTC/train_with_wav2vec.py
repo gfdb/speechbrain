@@ -26,6 +26,7 @@ Authors
 import sys
 
 import torch
+import torch.nn.functional as F
 import torchaudio
 from hyperpyyaml import load_hyperpyyaml
 
@@ -47,6 +48,8 @@ class ASR(sb.core.Brain):
         wavs, wav_lens = batch.sig
         tokens_bos, _ = batch.tokens_bos
         wavs, wav_lens = wavs.to(self.device), wav_lens.to(self.device)
+        
+        original_bs = wavs.size(0)
 
         # Add waveform augmentation if specified.
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
@@ -54,9 +57,72 @@ class ASR(sb.core.Brain):
 
         # Forward pass
         feats = self.modules.wav2vec2(wavs, wav_lens)
+
+        # Add feature augmentation if specified.
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            wavs, wav_lens = self.hparams.fea_augment(wavs, wav_lens)
+            
         x = self.modules.enc(feats)
         logits = self.modules.ctc_lin(x)
         p_ctc = self.hparams.log_softmax(logits)
+        
+
+        clean_kl_loss = 0
+        dirty_kl_loss = 0
+        if stage == sb.Stage.TRAIN:
+            bs = original_bs
+            multi = self.hparams.wav_augment.batch_multiplier
+            
+            if multi > 1:
+                # total should be bs * (multi + 1)
+                assert logits.size(0) == bs * (multi + 1)
+
+                dirty = logits[: bs * multi]             # [multi*bs, T, D]
+                clean = logits[bs * multi : ]            # [   bs, T, D]
+
+            logsoftmax_mean = lambda x: self.hparams.log_softmax(x).mean(dim=1)
+            logsoftmax_no_mean = lambda x: self.hparams.log_softmax(x)
+            
+            softmax_mean = lambda x: torch.clamp(F.softmax(x, dim=-1).mean(dim=1), min=1e-8)
+            softmax_no_mean = lambda x: torch.clamp(F.softmax(x, dim=-1), min=1e-8)
+
+            use_softmax = softmax_no_mean
+            use_logsoftmax = logsoftmax_no_mean
+
+            if getattr(self.hparams, 'kl_mean_time_axis', False):
+                use_softmax = softmax_mean
+                use_logsoftmax = logsoftmax_mean
+            else:
+                use_softmax = softmax_no_mean
+                use_logsoftmax = logsoftmax_no_mean
+
+            if getattr(self.hparams, 'kl_dirty', False):
+                dirty1 = logits[:bs]
+                dirty2 = logits[bs:2*bs]
+                dirty3 = logits[2*bs:3*bs]
+
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty2), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty1), use_softmax(dirty3), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty3), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty2), use_softmax(dirty1), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty1), reduction="batchmean")
+                dirty_kl_loss += F.kl_div(use_logsoftmax(dirty3), use_softmax(dirty2), reduction="batchmean")
+
+                dirty_kl_loss = dirty_kl_loss / 6
+
+
+            if getattr(self.hparams, 'kl_clean', False):
+                # now make distributions
+                dirty_logp = use_logsoftmax(dirty) # do log here --> `log P(x)`
+                clean_p = use_softmax(clean) # no log --> Q(x)
+            
+                clean_p_rep = clean_p.unsqueeze(0).repeat(multi, 1, 1, 1).transpose(0, 1).reshape(bs * multi, *clean_p.shape[1:])
+
+                # compute KL‑divergence
+                # KL(Q=clean ∥ P=dirty)
+                # detach clean so no grad flows back through it
+                clean_kl_loss = F.kl_div(dirty_logp, clean_p_rep.detach(), reduction="batchmean") 
+ 
 
         p_tokens = None
         if stage == sb.Stage.VALID:
@@ -66,23 +132,40 @@ class ASR(sb.core.Brain):
         elif stage == sb.Stage.TEST:
             p_tokens = test_searcher(p_ctc, wav_lens)
 
-        return p_ctc, wav_lens, p_tokens
+        return p_ctc, wav_lens, p_tokens, clean_kl_loss, dirty_kl_loss
 
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss (CTC) given predictions and targets."""
 
-        p_ctc, wav_lens, p_tokens = predictions
+        p_ctc, wav_lens, p_tokens, clean_kl_loss, dirty_kl_loss = predictions
 
         ids = batch.id
         tokens_eos, tokens_eos_lens = batch.tokens_eos
         tokens, tokens_lens = batch.tokens
-
+        
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "toggle_concat"):
+            if self.hparams.toggle_concat:
+                tokens = torch.cat([tokens, tokens], dim = 0)
+                tokens_lens = torch.cat([tokens_lens, tokens_lens], dim = 0)
+                p_ctc = torch.cat([p_ctc, p_ctc], dim = 0)
+                wav_lens = torch.cat([wav_lens, wav_lens], dim = 0)
+        
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             tokens = self.hparams.wav_augment.replicate_labels(tokens)
             tokens_lens = self.hparams.wav_augment.replicate_labels(tokens_lens)
 
-        loss = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            tokens = self.hparams.fea_augment.replicate_labels(tokens)
+            tokens_lens = self.hparams.fea_augment.replicate_labels(tokens_lens)
 
+        if stage == sb.Stage.TRAIN:
+            loss_ctc = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
+            loss_clean_kl = clean_kl_loss * self.hparams.kl_clean_weight
+            loss_dirty_kl = dirty_kl_loss * self.hparams.kl_dirty_weight
+            loss = loss_ctc + loss_clean_kl + loss_dirty_kl
+        else:
+            loss = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
+        
         if stage == sb.Stage.VALID:
             # Convert token indices to words
             predicted_words = self.tokenizer(p_tokens, task="decode_from_list")
@@ -251,6 +334,7 @@ def dataio_prepare(hparams, tokenizer):
     test_data = test_data.filtered_sorted(sort_key="duration")
 
     datasets = [train_data, valid_data, test_data]
+    valtest_datasets = [valid_data, test_data]
 
     # 2. Define audio pipeline:
     @sb.utils.data_pipeline.takes("wav")
@@ -264,7 +348,27 @@ def dataio_prepare(hparams, tokenizer):
         )(sig)
         return resampled
 
-    sb.dataio.dataset.add_dynamic_item(datasets, audio_pipeline)
+    sb.dataio.dataset.add_dynamic_item(valtest_datasets, audio_pipeline)
+
+    @sb.utils.data_pipeline.takes("wav")
+    @sb.utils.data_pipeline.provides("sig")
+    def audio_pipeline_train(wav):
+        info = torchaudio.info(wav)
+        sig = sb.dataio.dataio.read_audio(wav)
+        sig = torchaudio.transforms.Resample(
+            info.sample_rate,
+            hparams["sample_rate"],
+        )(sig)
+        if "usa_speed" in hparams and hparams["usa_speed"] and "speed_perturb" in hparams:
+            spd_prob = hparams['speed_prob'] # probability to apply speed perturbation 
+            if torch.randn((1,)).item() < spd_prob:
+                sig = hparams["speed_perturb"](sig.unsqueeze(0))
+                sig = sig.squeeze(0)
+        return sig
+
+    sb.dataio.dataset.add_dynamic_item([train_data], audio_pipeline_train)
+
+
 
     # 3. Define text pipeline:
     @sb.utils.data_pipeline.takes("wrd")
@@ -351,6 +455,10 @@ if __name__ == "__main__":
             "skip_prep": hparams["skip_prep"],
         },
     )
+    if "prepare_noise_data" in hparams:
+        sb.utils.distributed.run_on_main(hparams["prepare_noise_data"])
+    if "prepare_rir_data" in hparams:
+        sb.utils.distributed.run_on_main(hparams["prepare_rir_data"])
 
     # Defining tokenizer and loading it
     tokenizer = SentencePiece(

@@ -236,7 +236,8 @@ def process_line(
     audio_path = data_folder + "/clips/" + audio_path_filename
 
     if convert_to_wav:
-        audio_path = convert_mp3_to_wav(audio_path)
+        # audio_path = convert_mp3_to_wav(audio_path)
+        pass
 
     file_name = audio_path.split(".")[-2].split("/")[-1]
     snt_id = file_name
@@ -245,7 +246,7 @@ def process_line(
     if os.path.isfile(audio_path):
         info = read_audio_info(audio_path)
     else:
-        msg = "\tError loading: %s" % (str(len(file_name)))
+        msg = "\tError loading: %s" % audio_path
         logger.info(msg)
         return None
 

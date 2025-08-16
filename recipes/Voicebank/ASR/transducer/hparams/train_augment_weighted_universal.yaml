@@ -1,0 +1,256 @@
+# ################################
+# Model: VGG2 + LiGRU with time pooling for efficiency
+# Additions: TimeDomainSpecAugment
+# Authors: Mirco Ravanelli & Peter Plantinga 2020
+# ################################
+
+# Seed needs to be set at top of yaml, before objects with parameters are made
+seed: 1236
+__set_seed: !!python/object/apply:torch.manual_seed [!ref <seed>]
+input_type:  noisy_wav
+output_folder: !ref /home/gfdb/scratch/results/<input_type>/weighted_uni_aug/<seed>
+data_folder_noise: !ref <data_folder>/noise # The noisy sequencies for data augmentation will automatically be downloaded here.
+data_folder_rir: !ref <data_folder>/rir # The impulse responses used for data augmentation will automatically be downloaded here.
+per_file: !ref <output_folder>/per.txt
+save_folder: !ref <output_folder>/save
+train_log: !ref <output_folder>/train_log.txt
+noise_annotation: ../noise.csv
+rir_annotation: !ref <data_folder>/rir.csv
+
+# Data for augmentation
+NOISE_DATASET_URL: https://www.dropbox.com/scl/fi/a09pj97s5ifan81dqhi4n/noises.zip?rlkey=j8b0n9kdjdr32o1f06t0cw5b7&dl=1
+RIR_DATASET_URL: https://www.dropbox.com/scl/fi/linhy77c36mu10965a836/RIRs.zip?rlkey=pg9cu8vrpn2u173vhiqyu743u&dl=1
+
+# Data files
+data_folder: !PLACEHOLDER  # e.g. /path/to/Voicebank
+train_annotation: !ref <output_folder>/train.json
+valid_annotation: !ref <output_folder>/valid.json
+test_annotation: !ref <output_folder>/test.json
+skip_prep: False # Skip data preparation
+
+# # Waveform Augmenter (combining augmentations)
+time_parallel_augment: False  # Apply augmentations in parallel if True, or sequentially if False
+time_concat_original: True  # Concatenate original signals to the training batch if True
+time_repeat_augment: 1  # Number of times to apply augmentation
+time_shuffle_augmentations: False  # Shuffle order of augmentations if True, else use specified order
+time_min_augmentations: 1  # Min number of augmentations to apply
+time_max_augmentations: 1  # Max number of augmentations to apply
+time_augment_prob: 1.0     # Probability to apply time augmentation
+
+# Training parameters
+number_of_epochs: 50
+batch_size: 8
+sorting: ascending
+dataloader_options:
+    batch_size: !ref <batch_size>
+lr: 0.5
+max_grad_norm: 5.0
+
+# Set this to the path of a pretrained model to load before training
+# pretrained: model_clean_ep3.ckpt
+
+# Feature parameters
+sample_rate: 16000
+n_fft: 400
+n_mels: 40
+
+# Model parameters
+activation: !name:torch.nn.LeakyReLU
+dropout: 0.15
+cnn_blocks: 2
+cnn_channels: (128, 256)
+cnn_kernelsize: (3, 3)
+rnn_layers: 4
+rnn_neurons: 512
+rnn_bidirectional: True
+dnn_blocks: 2
+dnn_neurons: 512
+# emb_size: 128
+dec_neurons: 128
+
+# Outputs
+output_neurons: 42
+joint_dim: 128
+blank_index: 0
+
+# Decoding parameters
+beam_size: 4
+nbest: 1
+# by default {state,expand}_beam = 2.3 as mention in paper
+# https://arxiv.org/abs/1904.02619
+state_beam: 1.0
+expand_beam: 1.0
+
+# Dataloader options
+num_workers: 4
+train_dataloader_opts:
+    batch_size: !ref <batch_size>
+    num_workers: !ref <num_workers>
+valid_dataloader_opts:
+    batch_size: !ref <batch_size>
+    num_workers: !ref <num_workers>
+
+test_dataloader_opts:
+    batch_size: !ref <batch_size>
+    num_workers: !ref <num_workers>
+
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+    limit: !ref <number_of_epochs>
+
+compute_features: !new:speechbrain.lobes.features.Fbank
+    sample_rate: !ref <sample_rate>
+    n_fft: !ref <n_fft>
+    n_mels: !ref <n_mels>
+
+normalize: !new:speechbrain.processing.features.InputNormalization
+    norm_type: global
+
+# Download and prepare the dataset of noisy sequences for augmentation
+prepare_noise_data: !name:speechbrain.augment.preparation.prepare_dataset_from_URL
+    URL: !ref <NOISE_DATASET_URL>
+    dest_folder: !ref <data_folder_noise>
+    ext: wav
+    csv_file: !ref <noise_annotation>
+
+# Download and prepare the dataset of room impulse responses for augmentation
+prepare_rir_data: !name:speechbrain.augment.preparation.prepare_dataset_from_URL
+    URL: !ref <RIR_DATASET_URL>
+    dest_folder: !ref <data_folder_rir>
+    ext: wav
+    csv_file: !ref <rir_annotation>
+
+# ----- WAVEFORM AUGMENTATION ----- #
+
+uni_aug: !new:speechbrain.augment.time_domain.UniversalAugment
+
+# Augmenter: Combines previously defined augmentations to perform data augmentation
+wav_augment: !new:speechbrain.augment.augmenter.Augmenter
+    parallel_augment: !ref <time_parallel_augment>
+    concat_original: !ref <time_concat_original>
+    repeat_augment: !ref <time_repeat_augment>
+    shuffle_augmentations: !ref <time_shuffle_augmentations>
+    min_augmentations: !ref <time_min_augmentations>
+    max_augmentations: !ref <time_max_augmentations>
+    augment_prob: !ref <time_augment_prob>
+    augmentations: [!ref <uni_aug>]
+    enable_augmentations: [True]
+
+
+enc: !new:speechbrain.lobes.models.CRDNN.CRDNN
+    input_shape: [null, null, !ref <n_mels>]
+    activation: !ref <activation>
+    dropout: !ref <dropout>
+    cnn_blocks: !ref <cnn_blocks>
+    cnn_channels: !ref <cnn_channels>
+    cnn_kernelsize: !ref <cnn_kernelsize>
+    time_pooling: True
+    rnn_layers: !ref <rnn_layers>
+    rnn_neurons: !ref <rnn_neurons>
+    rnn_bidirectional: !ref <rnn_bidirectional>
+    dnn_blocks: !ref <dnn_blocks>
+    dnn_neurons: !ref <dnn_neurons>
+
+jit_module_keys: [enc]
+
+enc_lin: !new:speechbrain.nnet.linear.Linear
+    input_size: !ref <dnn_neurons>
+    n_neurons: !ref <joint_dim>
+    bias: False
+
+emb: !new:speechbrain.nnet.embedding.Embedding
+    num_embeddings: !ref <output_neurons>
+    consider_as_one_hot: True
+    blank_id: !ref <blank_index>
+
+dec: !new:speechbrain.nnet.RNN.LiGRU
+    input_shape: [null, null, !ref <output_neurons> - 1]
+    hidden_size: !ref <dec_neurons>
+    num_layers: 1
+    dropout: 0.0
+    normalization: layernorm
+    bidirectional: False
+
+dec_lin: !new:speechbrain.nnet.linear.Linear
+    input_size: !ref <dec_neurons>
+    n_neurons: !ref <joint_dim>
+    bias: False
+
+Tjoint: !new:speechbrain.nnet.transducer.transducer_joint.Transducer_joint
+    joint: sum # joint [sum | concat]
+    nonlinearity: !ref <activation>
+
+output: !new:speechbrain.nnet.linear.Linear
+    input_size: 128
+    n_neurons: !ref <output_neurons>  # 42 phonemes + 1 blank
+    bias: False
+
+compute_cost: !name:speechbrain.nnet.losses.transducer_loss
+    use_torchaudio: True
+    blank_index: !ref <blank_index>
+
+model: !new:torch.nn.ModuleList [[
+    !ref <enc>,
+    !ref <enc_lin>,
+    !ref <emb>,
+    !ref <dec>,
+    !ref <dec_lin>,
+    !ref <output>
+]]
+
+Greedysearcher: !new:speechbrain.decoders.transducer.TransducerBeamSearcher
+    decode_network_lst: [!ref <emb>, !ref <dec>, !ref <dec_lin>]
+    tjoint: !ref <Tjoint>
+    classifier_network: [!ref <output>]
+    blank_id: !ref <blank_index>
+    beam_size: 1
+    nbest: 1
+
+Beamsearcher: !new:speechbrain.decoders.transducer.TransducerBeamSearcher
+    decode_network_lst: [!ref <emb>, !ref <dec>, !ref <dec_lin>]
+    tjoint: !ref <Tjoint>
+    classifier_network: [!ref <output>]
+    blank_id: !ref <blank_index>
+    beam_size: !ref <beam_size>
+    nbest: !ref <nbest>
+    state_beam: !ref <state_beam>
+    expand_beam: !ref <expand_beam>
+
+opt_class: !name:torch.optim.Adadelta
+    rho: 0.95
+    eps: 1.e-8
+    lr: !ref <lr>
+
+lr_annealing: !new:speechbrain.nnet.schedulers.NewBobScheduler
+    initial_value: !ref <lr>
+    improvement_threshold: 0.0025
+    annealing_factor: 0.8
+    patient: 0
+
+modules:
+    enc: !ref <enc>
+    enc_lin: !ref <enc_lin>
+    emb: !ref <emb>
+    dec: !ref <dec>
+    dec_lin: !ref <dec_lin>
+    Tjoint: !ref <Tjoint>
+    output: !ref <output>
+    normalize: !ref <normalize>
+
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+    checkpoints_dir: !ref <save_folder>
+    recoverables:
+        model: !ref <model>
+        scheduler: !ref <lr_annealing>
+        normalizer: !ref <normalize>
+        counter: !ref <epoch_counter>
+
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+    save_file: !ref <train_log>
+
+transducer_stats: !name:speechbrain.utils.metric_stats.MetricStats
+    metric: !name:speechbrain.nnet.losses.transducer_loss
+        use_torchaudio: True
+        blank_index: !ref <blank_index>
+        reduction: none
+
+per_stats: !name:speechbrain.utils.metric_stats.ErrorRateStats

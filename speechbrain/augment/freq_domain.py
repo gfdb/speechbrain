@@ -145,6 +145,9 @@ class SpectrogramDrop(torch.nn.Module):
             size=(1,),
             device=spectrogram.device,
         )
+        
+        if n_masks == 0:
+            return spectrogram
 
         # If the number of chunks to drop is 0, return the spectrogram unchanged
         if n_masks == 0:
