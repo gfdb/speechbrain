@@ -34,13 +34,16 @@ class SLU(sb.Brain):
         wavs, wav_lens = batch.sig
         tokens_bos, tokens_bos_lens = batch.tokens_bos
 
-        # Add waveform augmentation if specified.
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
             tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
 
         #  encoder forward pass
         wav2vec2_out = self.modules.wav2vec2(wavs, wav_lens)
+
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            wavs, wav_lens = self.hparams.fea_augment(wavs, wav_lens)
+            tokens_bos = self.hparams.fea_augment.replicate_labels(tokens_bos)
 
         # SLU forward pass
         e_in = self.hparams.output_emb(tokens_bos)
@@ -75,6 +78,13 @@ class SLU(sb.Brain):
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             tokens_eos = self.hparams.wav_augment.replicate_labels(tokens_eos)
             tokens_eos_lens = self.hparams.wav_augment.replicate_labels(
+                tokens_eos_lens
+            )
+
+        # Label Augmentation
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            tokens_eos = self.hparams.fea_augment.replicate_labels(tokens_eos)
+            tokens_eos_lens = self.hparams.fea_augment.replicate_labels(
                 tokens_eos_lens
             )
 

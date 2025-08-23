@@ -25,7 +25,14 @@ class EmoIdBrain(sb.Brain):
         batch = batch.to(self.device)
         wavs, lens = batch.sig
 
+
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
+            wavs, lens = self.hparams.wav_augment(wavs, lens)
+        
         outputs = self.modules.wav2vec2(wavs, lens)
+
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            wavs, lens = self.hparams.fea_augment(wavs, lens)
 
         # last dim will be used for AdaptiveAVG pool
         outputs = self.hparams.avg_pool(outputs, lens)
@@ -41,6 +48,13 @@ class EmoIdBrain(sb.Brain):
 
         """to meet the input form of nll loss"""
         emoid = emoid.squeeze(1)
+
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
+            emoid = self.hparams.wav_augment.replicate_labels(emoid)
+        
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            emoid = self.hparams.fea_augment.replicate_labels(emoid)
+
         loss = self.hparams.compute_cost(predictions, emoid)
         if stage != sb.Stage.TRAIN:
             self.error_metrics.append(batch.id, predictions, emoid)
