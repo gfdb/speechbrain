@@ -168,12 +168,19 @@ class LID(sb.Brain):
 
         # At the end of validation...
         if stage == sb.Stage.VALID:
+            steps = self.optimizer_step
+            optimizer = self.optimizer.__class__.__name__
             old_lr, new_lr = self.hparams.lr_annealing(epoch)
             sb.nnet.schedulers.update_learning_rate(self.optimizer, new_lr)
 
             # The train_logger writes a summary to stdout and to the logfile.
             self.hparams.train_logger.log_stats(
-                {"Epoch": epoch, "lr": old_lr},
+                {
+                    "epoch": epoch,
+                    "lr": old_lr,
+                    'steps': steps,
+                    'optimizer': optimizer
+                },
                 train_stats={"loss": self.train_loss},
                 valid_stats=stats,
             )
