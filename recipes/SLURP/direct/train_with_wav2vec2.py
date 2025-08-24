@@ -42,7 +42,7 @@ class SLU(sb.Brain):
         wav2vec2_out = self.modules.wav2vec2(wavs, wav_lens)
 
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
-            wavs, wav_lens = self.hparams.fea_augment(wavs, wav_lens)
+            wav2vec2_out, wav_lens = self.hparams.fea_augment(wav2vec2_out, wav_lens)
             tokens_bos = self.hparams.fea_augment.replicate_labels(tokens_bos)
 
         # SLU forward pass
