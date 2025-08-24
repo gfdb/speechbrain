@@ -230,12 +230,12 @@ compute_cost: !new:speechbrain.nnet.losses.LogSoftmaxWrapper
 lr: 0.0001
 lr_final: 0.00001
 
-
+weight_decay: 0.000002
 # This optimizer will be constructed by the Brain class after all parameters
 # are moved to the correct device. Then it will be added to the checkpointer.
-opt_class: !name:torch.optim.Adam
+opt_class: !name:torch.optim.AdamW
     lr: !ref <lr>
-    weight_decay: 0.000002
+    weight_decay: !ref <weight_decay>
 
 
 # Linear lr decay

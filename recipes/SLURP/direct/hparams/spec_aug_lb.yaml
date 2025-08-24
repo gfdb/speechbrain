@@ -184,11 +184,14 @@ beam_searcher: !new:speechbrain.decoders.S2SRNNBeamSearcher
     using_max_attn_shift: False
     max_attn_shift: 30
 
-opt_class: !name:torch.optim.Adam
+weight_decay: 0
+opt_class: !name:torch.optim.AdamW
     lr: !ref <lr>
+    weight_decay: !ref <weight_decay>
 
-wav2vec2_opt_class: !name:torch.optim.Adam
+wav2vec2_opt_class: !name:torch.optim.AdamW
     lr: !ref <lr_wav2vec2>
+    weight_decay: !ref <weight_decay>
 
 lr_annealing: !new:speechbrain.nnet.schedulers.NewBobScheduler
     initial_value: !ref <lr>
