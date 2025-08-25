@@ -294,9 +294,9 @@ if __name__ == "__main__":
         },
     )
     # Data preparation for augmentation
-    if hasattr(hparams, "prepare_noise_data"):
+    if 'prepare_noise_data' in hparams:
         sb.utils.distributed.run_on_main(hparams["prepare_noise_data"])
-    if hasattr(hparams, "prepare_rir_data"):
+    if 'prepare_rir_data' in hparams:
         sb.utils.distributed.run_on_main(hparams["prepare_rir_data"])
 
     # Create dataset objects "train", "dev", and "test" and language_encoder
