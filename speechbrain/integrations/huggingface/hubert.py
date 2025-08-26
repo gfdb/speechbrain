@@ -76,6 +76,7 @@ class HuBERT(Wav2Vec2):
         freeze_feature_extractor=False,
         apply_spec_augment=False,
         output_all_hiddens=False,
+        feat_mask=False
     ):
         super().__init__(
             source=source,
@@ -85,4 +86,5 @@ class HuBERT(Wav2Vec2):
             freeze_feature_extractor=freeze_feature_extractor,
             apply_spec_augment=apply_spec_augment,
             output_all_hiddens=output_all_hiddens,
+            feat_mask=feat_mask
         )
