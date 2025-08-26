@@ -91,8 +91,10 @@ class Wav2Vec2(HFTransformersInterface):
         )
 
         self.model.config.apply_spec_augment = apply_spec_augment
+        # pull custom knobs so they don't reach the parent
+        feat_mask = kwargs.pop("feat_mask", False)
 
-        if apply_spec_augment and 'feat_mask' in kwargs and kwargs['feat_mask'] is True:
+        if apply_spec_augment and feat_mask:
             self.model.config.mask_feature_prob = 0.008
             self.model.config.mask_feature_length = 64
 
