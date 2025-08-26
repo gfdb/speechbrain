@@ -70,11 +70,15 @@ dataloader_opts:
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
     limit: !ref <number_of_epochs>
 
+time_mask: True
+feat_mask: True
 # Models
 wav2vec2: !new:speechbrain.integrations.huggingface.hubert.HuBERT
     source: !ref <wav2vec2_hub>
     output_norm: True
     freeze: !ref <freeze_wav2vec2>
+    apply_spec_augment: !ref <time_mask>
+    feat_mask: !ref <feat_mask>
     save_path: !ref <save_folder>/wav2vec2_checkpoint
 
 output_emb: !new:speechbrain.nnet.embedding.Embedding
@@ -97,59 +101,6 @@ seq_lin: !new:speechbrain.nnet.linear.Linear
     n_neurons: !ref <output_neurons>
 
 ############################## Augmentations ###################################
-
-# LB Time Ratio: 100 frames @ 10 ms = 1.0 s.
-# LB Freq Ratio: 27 / 80 ≈ 0.3375
-
-# Time drop (T = ~10% frames)
-# full shape: [X, 159, 768]
-time_drop: !new:speechbrain.augment.freq_domain.SpectrogramDrop
-    drop_length_low: 50
-    drop_length_high: 51
-    drop_count_low: 1
-    drop_count_high: 1
-
-# Frequency drop (F = 1/3 of frames), scaled based on LB Basic
-freq_drop: !new:speechbrain.augment.freq_domain.SpectrogramDrop
-    drop_length_low: 256
-    drop_length_high: 257
-    drop_count_low: 1
-    drop_count_high: 1
-    dim: 2
-
-# Time warp
-# 80 @ 10 ms = ~40 @ 20ms
-time_warp: !new:speechbrain.augment.freq_domain.Warping
-    warp_window: 40
-    warp_mode: bicubic
-    dim: 1
-
-min_num_aug: 1
-num_aug: 1
-batch_multiplier: 0 # 0/1 -> no batch multiplication
-concat_original: False
-aug_strategy: 'all'
-
-toggle_time_drop: True
-toggle_freq_drop: True
-toggle_time_warp: False
-
-fea_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
-    augmentations: [
-        !ref <time_drop>,
-        !ref <freq_drop>,
-        !ref <time_warp>
-    ]
-    min_num_aug: !ref <min_num_aug>
-    num_aug: !ref <num_aug>
-    batch_multiplier: !ref <batch_multiplier>
-    concat_original: !ref <concat_original>
-    aug_strategy: !ref <aug_strategy>
-    aug_toggles: [
-        !ref <toggle_time_drop>,
-        !ref <toggle_freq_drop>,
-        !ref <toggle_time_warp>
-    ]
 
 modules:
     wav2vec2: !ref <wav2vec2>
