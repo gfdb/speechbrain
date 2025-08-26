@@ -103,7 +103,7 @@ class SLU(sb.Brain):
 
             target_semantics = [wrd.split(" ") for wrd in batch.semantics]
 
-            self.log_outputs(predicted_semantics, target_semantics)
+            # self.log_outputs(predicted_semantics, target_semantics)
 
             if stage != sb.Stage.TRAIN:
                 self.wer_metric.append(
