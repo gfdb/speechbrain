@@ -95,7 +95,7 @@ add_noise: !new:speechbrain.augment.time_domain.AddNoise
 
 # Speed perturbation
 speed_perturb: !new:speechbrain.augment.time_domain.SpeedPerturb
-    orig_freq: !ref <sample_rate>
+    orig_freq: 16000
     speeds: !ref <speed_changes>
 
 # Frequency drop: randomly drops a number of frequency bands to zero.
