@@ -100,7 +100,6 @@ seq_lin: !new:speechbrain.nnet.linear.Linear
     input_size: !ref <dec_neurons>
     n_neurons: !ref <output_neurons>
 
-############################## Augmentations ###################################
 
 modules:
     wav2vec2: !ref <wav2vec2>
