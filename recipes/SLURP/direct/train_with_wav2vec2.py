@@ -338,6 +338,10 @@ if __name__ == "__main__":
         },
     )
 
+    # Data preparation for augmentation
+    if 'prepare_noise_data' in hparams:
+        sb.utils.distributed.run_on_main(hparams["prepare_noise_data"])
+
     # here we create the datasets objects as well as tokenization and encoding
     (
         train_set,
