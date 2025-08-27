@@ -89,8 +89,8 @@ add_noise: !new:speechbrain.augment.time_domain.AddNoise
     csv_file: !ref <noise_annotation>
     snr_low: !ref <snr_low>
     snr_high: !ref <snr_high>
-    noise_sample_rate: !ref <sample_rate>
-    clean_sample_rate: !ref <sample_rate>
+    noise_sample_rate: 16000
+    clean_sample_rate: 16000
     num_workers: 0
 
 # Speed perturbation
