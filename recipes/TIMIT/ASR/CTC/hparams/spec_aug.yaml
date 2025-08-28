@@ -20,14 +20,9 @@ test_annotation: !ref <save_folder>/test.json
 skip_prep: False # Skip data preparation
 uppercase: False # Must be True when the TIMIT dataset is in the upper-case version
 
-# Data for augmentation
-data_folder_noise: !ref <data_folder>/noise # The noisy sequences for data augmentation will automatically be downloaded here.
-NOISE_DATASET_URL: https://www.dropbox.com/scl/fi/a09pj97s5ifan81dqhi4n/noises.zip?rlkey=j8b0n9kdjdr32o1f06t0cw5b7&dl=1
-noise_annotation: !ref <save_folder>/noise.csv #The data manifest files are created by the data preparation script
-
 ####################### Training Parameters ####################################
 number_of_epochs: 50
-batch_size: 8
+batch_size: 16
 lr: 1.0
 sorting: ascending # choose between ascending, descending and random
 
@@ -71,59 +66,42 @@ normalize: !new:speechbrain.processing.features.InputNormalization
 
 ############################## Augmentations ###################################
 
-# Download and prepare the dataset of noisy sequences for augmentation
-prepare_noise_data: !name:speechbrain.augment.preparation.prepare_dataset_from_URL
-    URL: !ref <NOISE_DATASET_URL>
-    dest_folder: !ref <data_folder_noise>
-    ext: wav
-    csv_file: !ref <noise_annotation>
-
-# Add noise to input signal
-add_noise: !new:speechbrain.augment.time_domain.AddNoise
-    csv_file: !ref <noise_annotation>
-    snr_low: 0
-    snr_high: 15
-    noise_sample_rate: !ref <sample_rate>
-    clean_sample_rate: !ref <sample_rate>
-    num_workers: !ref <num_workers>
-
-# Speed perturbation
-speed_perturb: !new:speechbrain.augment.time_domain.SpeedPerturb
-    orig_freq: !ref <sample_rate>
-    speeds: [95, 100, 105]
-
-# Frequency drop: randomly drops a number of frequency bands to zero.
-drop_freq: !new:speechbrain.augment.time_domain.DropFreq
-    drop_freq_low: 0
-    drop_freq_high: 1
-    drop_freq_count_low: 1
-    drop_freq_count_high: 3
-    drop_freq_width: 0.05
-
-# Time drop: randomly drops a number of temporal chunks.
-drop_chunk: !new:speechbrain.augment.time_domain.DropChunk
-    drop_length_low: 1000
-    drop_length_high: 2000
+# Time drop (T = 100 frames)
+time_drop: !new:speechbrain.augment.freq_domain.SpectrogramDrop
+    drop_length_low: 100
+    drop_length_high: 101
     drop_count_low: 1
-    drop_count_high: 5
+    drop_count_high: 1
+
+# Frequency drop (F = 13~14 on 40 mel bands), scaled from 27 on 80 mel bands
+freq_drop: !new:speechbrain.augment.freq_domain.SpectrogramDrop
+    drop_length_low: 13
+    drop_length_high: 14
+    drop_count_low: 1
+    drop_count_high: 1
+    dim: 2
+
+# Time warp
+time_warp: !new:speechbrain.augment.freq_domain.Warping
+    warp_window: 80
+    warp_mode: bicubic
+    dim: 1
 
 min_num_aug: 1
 num_aug: 1
-batch_multiplier: 0 # 0 -> no batch multiplication
-concat_original: True
+batch_multiplier: 0 # 0/1 -> no batch multiplication
+concat_original: False
 aug_strategy: 'all'
 
-toggle_add_noise: True
-toggle_speed_perturb: True
-toggle_drop_freq: True
-toggle_drop_chunk: True
+toggle_time_drop: True
+toggle_freq_drop: True
+toggle_time_warp: False
 
-wav_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
+fea_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     augmentations: [
-        !ref <add_noise>,
-        !ref <speed_perturb>,
-        !ref <drop_freq>,
-        !ref <drop_chunk>
+        !ref <time_drop>,
+        !ref <freq_drop>,
+        !ref <time_warp>
     ]
     min_num_aug: !ref <min_num_aug>
     num_aug: !ref <num_aug>
@@ -131,12 +109,10 @@ wav_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     concat_original: !ref <concat_original>
     aug_strategy: !ref <aug_strategy>
     aug_toggles: [
-        !ref <toggle_add_noise>,
-        !ref <toggle_speed_perturb>,
-        !ref <toggle_drop_freq>,
-        !ref <toggle_drop_chunk>
+        !ref <toggle_time_drop>,
+        !ref <toggle_freq_drop>,
+        !ref <toggle_time_warp>
     ]
-
 
 ############################## Models ##########################################
 
@@ -170,16 +146,16 @@ output: !new:speechbrain.nnet.linear.Linear
 log_softmax: !new:speechbrain.nnet.activations.Softmax
     apply_log: True
 
-opt_class: !name:torch.optim.Adadelta
-    rho: 0.95
+weight_decay: 0
+opt_class: !name:torch.optim.AdamW
     lr: !ref <lr>
-    eps: 1.e-8
+    weight_decay: !ref <weight_decay>
 
 lr_annealing: !new:speechbrain.nnet.schedulers.NewBobScheduler
     initial_value: !ref <lr>
-    improvement_threshold: 0.0025
+    improvement_threshold: 0.005
     annealing_factor: 0.8
-    patient: 0
+    patient: 1
 
 modules:
     model: !ref <model>
