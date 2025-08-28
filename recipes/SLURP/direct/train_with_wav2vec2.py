@@ -378,8 +378,8 @@ if __name__ == "__main__":
         slu_brain.hparams.epoch_counter,
         train_set,
         valid_set,
-        train_loader_kwargs=hparams["dataloader_opts"],
-        valid_loader_kwargs=hparams["dataloader_opts"],
+        train_loader_kwargs=hparams["train_dataloader_opts"],
+        valid_loader_kwargs=hparams["valid_dataloader_opts"],
     )
 
     # Test
@@ -389,4 +389,4 @@ if __name__ == "__main__":
     for i in range(len(df)):
         id_to_file[str(df.ID[i])] = df.wav[i].split("/")[-1]
 
-    slu_brain.evaluate(test_set, test_loader_kwargs=hparams["dataloader_opts"])
+    slu_brain.evaluate(test_set, test_loader_kwargs=hparams["test_dataloader_opts"])
