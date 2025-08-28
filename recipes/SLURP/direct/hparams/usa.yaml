@@ -21,7 +21,7 @@ test_wer_file: !ref <output_folder>/wer_test_real.txt
 # The SLURP dataset will be automatically downloaded in the specified data_folder
 data_folder: !<PLACEHOLDER> # e.g, /localscratch/SLURP
 # data_folder_rirs: !ref <data_folder>
-train_splits: ["train_real"]
+train_splits: ["train_synthetic", "train_real"]
 csv_train: !ref <output_folder>/train-type=direct.csv
 csv_valid: !ref <output_folder>/devel-type=direct.csv
 csv_test: !ref <output_folder>/test-type=direct.csv
