@@ -504,12 +504,22 @@ class SpeedPerturb(torch.nn.Module):
         -------
         torch.Tensor of shape `[batch, time]` or `[batch, time, channels]`.
         """
+        orig_dtype = waveform.dtype
 
         # Perform a random perturbation
         self.samp_index = torch.randint(0, len(self.speeds), (1,))
-        perturbed_waveform = self.resamplers[self.samp_index](
-            waveform.to(self.device)
-        )
+        resampler = self.resamplers[self.samp_index]
+        
+        need_cast = orig_dtype not in (torch.float32, torch.float64)
+
+        with torch.amp.autocast("cuda" if "cuda" in self.device else "cpu", enabled=False):
+            wf = waveform.to(torch.float32) if need_cast else waveform
+            resampled_waveform = resampler(wf)
+
+        # restore caller dtype
+        if need_cast:
+            perturbed_waveform = resampled_waveform.to(orig_dtype)
+
         # Move back from host to original device
         return perturbed_waveform.to(waveform.device)
 
