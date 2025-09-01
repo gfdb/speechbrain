@@ -1,6 +1,6 @@
 import inspect
-
 import logging
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -209,6 +209,8 @@ class NewAugmenter(nn.Module):
         # if there is a single batch copy
         # just return it as all the lengths will be the same
         if len(batch_copies) == 1:
+            if lengths is None:
+                return batch_copies[0]
             return batch_copies[0], length_copies[0]
         
         outputs, out_lens = self.concatenate_outputs(batch_copies, length_copies) 
