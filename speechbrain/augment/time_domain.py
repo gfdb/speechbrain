@@ -514,11 +514,11 @@ class SpeedPerturb(torch.nn.Module):
 
         with torch.amp.autocast("cuda" if "cuda" in self.device else "cpu", enabled=False):
             wf = waveform.to(torch.float32) if need_cast else waveform
-            resampled_waveform = resampler(wf)
+            perturbed_waveform = resampler(wf)
 
         # restore caller dtype
         if need_cast:
-            perturbed_waveform = resampled_waveform.to(orig_dtype)
+            perturbed_waveform = perturbed_waveform.to(orig_dtype)
 
         # Move back from host to original device
         return perturbed_waveform.to(waveform.device)
