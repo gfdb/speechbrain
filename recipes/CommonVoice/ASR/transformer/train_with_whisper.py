@@ -51,7 +51,7 @@ class ASR(sb.Brain):
         bos_tokens[~pad_mask] = self.tokenizer.pad_token_id
 
         # Forward encoder + decoder
-        enc_out, logits, _ = self.modules.whisper(wavs, bos_tokens)
+        enc_out, logits, _ = self.modules.whisper(wavs, bos_tokens, do_augment=(stage == sb.Stage.TRAIN))
         log_probs = self.hparams.log_softmax(logits)
 
         hyps = None

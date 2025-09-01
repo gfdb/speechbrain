@@ -183,7 +183,7 @@ class Whisper(HFTransformersInterface):
         for param in model.parameters():
             param.requires_grad = False
 
-    def forward(self, wav, decoder_input_ids=None):
+    def forward(self, wav, decoder_input_ids=None, do_augment=False):
         """Perform mel transformation and one step of the whisper (encoder-decoder).
 
         Arguments
@@ -209,7 +209,7 @@ class Whisper(HFTransformersInterface):
         def _forward():
             """Forward pass of the model"""
             mel = self._get_mel(wav)
-            if self.augmenter is not None:
+            if self.augmenter is not None and do_augment:
                 mel = self.augmenter(mel)
             
             out_encoder = self.forward_encoder(mel)
