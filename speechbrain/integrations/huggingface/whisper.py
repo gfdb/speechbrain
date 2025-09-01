@@ -99,6 +99,7 @@ class Whisper(HFTransformersInterface):
         output_all_hiddens=False,
         language=None,
         task="transcribe",
+        augmenter=None
     ):
         super().__init__(source=source, save_path=save_path, freeze=freeze)
         self.sampling_rate = sampling_rate
@@ -108,6 +109,7 @@ class Whisper(HFTransformersInterface):
         self.output_all_hiddens = output_all_hiddens
         self.language = language
         self.task = task
+        self.augmenter = augmenter
 
         if encoder_only:
             self.tokenizer = None
@@ -207,6 +209,9 @@ class Whisper(HFTransformersInterface):
         def _forward():
             """Forward pass of the model"""
             mel = self._get_mel(wav)
+            if self.augmenter is not None:
+                mel = self.augmenter(mel)
+            
             out_encoder = self.forward_encoder(mel)
             if self.encoder_only:
                 return out_encoder

@@ -286,6 +286,10 @@ if __name__ == "__main__":
             "skip_prep": hparams["skip_prep"],
         },
     )
+
+    if 'prepare_noise_data' in hparams:
+        sb.utils.distributed.run_on_main(hparams["prepare_noise_data"])
+
     # Defining tokenizer and loading it
     tokenizer = hparams["whisper"].tokenizer
 
