@@ -37,7 +37,7 @@ class ASR(sb.core.Brain):
         feats = self.hparams.compute_features(wavs)
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
             feats, fea_lens = self.hparams.fea_augment(feats, wav_lens)
-            tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
+            tokens_bos = self.hparams.fea_augment.replicate_labels(tokens_bos)
 
         current_epoch = self.hparams.epoch_counter.current
         feats = self.hparams.normalize(feats, wav_lens, epoch=current_epoch)
@@ -408,7 +408,8 @@ if __name__ == "__main__":
             "remove_compressed_wavs": hparams["remove_compressed_wavs"],
         },
     )
-    run_on_main(hparams["prepare_noise_data"])
+    if "prepare_noise_data" in hparams:
+        run_on_main(hparams["prepare_noise_data"])
 
     # here we create the datasets objects as well as tokenization and encoding
     (

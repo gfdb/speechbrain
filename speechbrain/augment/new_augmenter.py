@@ -254,6 +254,20 @@ class NewAugmenter(nn.Module):
             out = out[indices].contiguous()
         return out
 
+    def replicate_multiple_labels(self, *args):
+        # Determine whether to apply data augmentation
+        num_repl = self.batch_multiplier + int(self.concat_original)
+        
+        if num_repl <= 1:
+            return args
+
+        list_of_augmented_labels = []
+
+        for labels in args:
+            list_of_augmented_labels.append(self.replicate_labels(labels))
+
+        return list_of_augmented_labels
+
 
     def concatenate_outputs(self, augment_lst, augment_len_lst):
         """
