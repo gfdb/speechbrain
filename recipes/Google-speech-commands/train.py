@@ -55,7 +55,7 @@ class SpeakerBrain(sb.core.Brain):
             feats = self.modules.mean_var_norm(feats, lens)
 
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
-            feats = self.hparams.fea_augment(feats, lens)
+            feats = self.hparams.fea_augment(feats)
 
         # Embeddings + classifier
         embeddings = self.modules.embedding_model(feats)
