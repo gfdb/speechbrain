@@ -54,6 +54,9 @@ class SpeakerBrain(sb.core.Brain):
             feats = self.modules.compute_features(wavs)
             feats = self.modules.mean_var_norm(feats, lens)
 
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            feats = self.hparams.fea_augment(feats, lens)
+
         # Embeddings + classifier
         embeddings = self.modules.embedding_model(feats)
         outputs = self.modules.classifier(embeddings)
@@ -73,6 +76,9 @@ class SpeakerBrain(sb.core.Brain):
         # Concatenate labels (due to data augmentation)
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             command = self.hparams.wav_augment.replicate_labels(command)
+
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            command = self.hparams.fea_augment.replicate_labels(command)
 
         # compute the cost function
         loss = self.hparams.compute_cost(predictions, command, lens)
