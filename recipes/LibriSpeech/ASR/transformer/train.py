@@ -213,7 +213,7 @@ class ASR(sb.core.Brain):
             p_ctc, tokens, wav_lens, tokens_lens
         ).sum()
 
-        if stage == sb.Stage.TRAIN:
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, 'kl_clean_weight'):
             loss_ctc = self.hparams.ctc_weight * loss_ctc
             loss_seq = (1 - self.hparams.ctc_weight) * loss_seq
             loss_clean_kl = clean_kl_loss * self.hparams.kl_clean_weight
