@@ -53,6 +53,11 @@ class ASR(sb.core.Brain):
         wavs, wav_lens = batch.sig
         tokens_bos, _ = batch.tokens_bos
 
+        # Add feature augmentation if specified.
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
+            feats, fea_lens = self.hparams.wav_augment(feats, wav_lens)
+            tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
+
         # compute features
         feats = self.hparams.compute_features(wavs)
         current_epoch = self.hparams.epoch_counter.current
@@ -106,6 +111,17 @@ class ASR(sb.core.Brain):
         tokens, tokens_lens = batch.tokens
 
         if stage == sb.Stage.TRAIN:
+            if hasattr(self.hparams, "wav_augment"):
+                tokens = self.hparams.wav_augment.replicate_labels(tokens)
+                tokens_lens = self.hparams.wav_augment.replicate_labels(
+                    tokens_lens
+                )
+                tokens_eos = self.hparams.wav_augment.replicate_labels(
+                    tokens_eos
+                )
+                tokens_eos_lens = self.hparams.wav_augment.replicate_labels(
+                    tokens_eos_lens
+                )
             if hasattr(self.hparams, "fea_augment"):
                 tokens = self.hparams.fea_augment.replicate_labels(tokens)
                 tokens_lens = self.hparams.fea_augment.replicate_labels(
@@ -298,14 +314,7 @@ def dataio_prepare(hparams):
     @sb.utils.data_pipeline.takes("wav")
     @sb.utils.data_pipeline.provides("sig")
     def audio_pipeline_train(wav):
-        # Speed Perturb is done here so it is multi-threaded with the
-        # workers of the dataloader (faster).
-        if "speed_perturb" in hparams:
-            sig = sb.dataio.dataio.read_audio(wav)
-
-            sig = hparams["speed_perturb"](sig.unsqueeze(0)).squeeze(0)
-        else:
-            sig = sb.dataio.dataio.read_audio(wav)
+        sig = sb.dataio.dataio.read_audio(wav)
         return sig
 
     sb.dataio.dataset.add_dynamic_item([train_data], audio_pipeline_train)
