@@ -81,6 +81,8 @@ class NewAugmenter(nn.Module):
             out_lens = torch.cat([lengths, lengths], dim=0)
             return out, out_lens
         if not self.augmentations:
+            if lengths is None:
+                return x
             return x, lengths
 
         # create list of batch copies
