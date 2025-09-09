@@ -383,6 +383,16 @@ num_aug: 2
 batch_multiplier: 0 # 0 -> no batch multiplication
 concat_original: False
 aug_strategy: 'random'
+
+toggle_add_noise: True
+toggle_speed_perturb: True
+toggle_drop_freq: True
+toggle_drop_chunk: True
+toggle_clipping: True
+toggle_rand_amp: True
+toggle_sign_flip: True
+toggle_chunk_swap: True
+toggle_babble_noise: True
  
 wav_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     augmentations: [
@@ -401,6 +411,17 @@ wav_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     batch_multiplier: !ref <batch_multiplier>
     concat_original: !ref <concat_original>
     aug_strategy: !ref <aug_strategy>
+    aug_toggles: [
+        !ref <toggle_add_noise>,
+        !ref <toggle_speed_perturb>,
+        !ref <toggle_drop_freq>,
+        !ref <toggle_drop_chunk>,
+        !ref <toggle_clipping>,
+        !ref <toggle_rand_amp>,
+        !ref <toggle_sign_flip>,
+        !ref <toggle_chunk_swap>,
+        !ref <toggle_babble_noise>
+    ]
 
 compute_features: !new:speechbrain.lobes.features.Fbank
     sample_rate: !ref <sample_rate>
