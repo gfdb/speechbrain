@@ -391,6 +391,9 @@ if __name__ == "__main__":
         },
     )
 
+    if 'prepare_noise_data' in hparams:
+        sb.utils.distributed.run_on_main(hparams["prepare_noise_data"])
+
     # Defining tokenizer and loading it
     tokenizer = SentencePiece(
         model_dir=hparams["save_folder"],
