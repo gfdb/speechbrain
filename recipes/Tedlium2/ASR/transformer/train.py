@@ -55,7 +55,7 @@ class ASR(sb.core.Brain):
 
         # Add feature augmentation if specified.
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
-            feats, fea_lens = self.hparams.wav_augment(feats, wav_lens)
+            wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
             tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
 
         # compute features
