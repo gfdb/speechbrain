@@ -415,6 +415,9 @@ if __name__ == "__main__":
         valid_bsampler,
     ) = dataio_prepare(hparams)
 
+    if "prepare_noise_data" in hparams:
+        run_on_main(hparams["prepare_noise_data"])
+
     # We download the pretrained LM from HuggingFace (or elsewhere depending on
     # the path given in the YAML file). The tokenizer is loaded at the same time.
     hparams["pretrainer"].collect_files()
