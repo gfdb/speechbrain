@@ -217,15 +217,14 @@ def prepare_tedlium2(
             )
 
             csv_writer.writerow(["ID", "duration", "wav", "spk_id", "wrd"])
-            for row in parallel_map(line_processor, talk_sphs):
+            for talk in talk_sphs:
+                row = line_processor(talk)  # parallel map breaks here and i dont feel like fixing it
                 if row is None:
                     continue
-
                 for line in row:
                     csv_writer.writerow(line)
                     total_duration += float(line[1])
                 total_line += len(row)
-
         os.replace(tmp_csv, final_csv)
 
         msg = "\t%s successfully created!" % (new_filename)
