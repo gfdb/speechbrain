@@ -202,7 +202,7 @@ class _ParallelMapper:
 def parallel_map(
     fn: Callable[[Any], Any],
     source: Iterable[Any],
-    process_count: int = multiprocessing.cpu_count(),
+    process_count: int = 4,
     chunk_size: int = 8,
     queue_size: int = 128,
     executor: Optional[Executor] = None,
