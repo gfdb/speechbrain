@@ -63,7 +63,10 @@ class ASR(sb.core.Brain):
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
             tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
-                
+
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav2aug_gpu"):
+            wavs, wav_lens = self.hparams.wav2aug_gpu(wavs, lengths=wav_lens)
+
         # compute features
         feats = self.hparams.compute_features(wavs)
         current_epoch = self.hparams.epoch_counter.current
@@ -404,6 +407,8 @@ def dataio_prepare(hparams):
             if torch.randn((1,)).item() < spd_prob:
                 sig = hparams["speed_perturb"](sig.unsqueeze(0))
                 sig = sig.squeeze(0)
+        if "wav2aug_cpu" in hparams:
+            sig = hparams['wav2aug_cpu'](sig).squeeze()
         return sig
 
     sb.dataio.dataset.add_dynamic_item([train_data], audio_pipeline_train)

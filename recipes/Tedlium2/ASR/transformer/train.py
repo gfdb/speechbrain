@@ -57,6 +57,9 @@ class ASR(sb.core.Brain):
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
             tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
+        
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav2aug_gpu"):
+            wavs, wav_lens = self.hparams.wav2aug_gpu(wavs, wav_lens)
 
         # compute features
         feats = self.hparams.compute_features(wavs)
