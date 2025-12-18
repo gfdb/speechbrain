@@ -202,14 +202,25 @@ sb_babble_noise: !new:speechbrain.augment.time_domain.AddNoise
     noise_funct: !ref <sum_batch>
 
 # ============================================================================
-# Augmentation selector using SpeechBrain's Augmenter with single augmentation
-# Note: Only one augmentation can be active at a time. To switch, you need to
-# modify the augmentations list below or use separate YAML files per augmentation.
-# For automated switching, use the run_single_aug.py script with --backend=speechbrain
+# Augmentation selector using SpeechBrain's Augmenter with enable_augmentations
+# 
+# To enable a specific augmentation, pass it via CLI:
+#   --enable_add_noise=True
+#   --enable_drop_chunk=True
+#   etc.
 # ============================================================================
 
-# Default: use drop_chunk for testing. Change this list to test other augmentations.
-# The run_single_aug.py script can generate per-augmentation configs automatically.
+# Individual enable flags (all False by default)
+enable_add_noise: False
+enable_speed_perturb: False
+enable_drop_freq: False
+enable_drop_chunk: False
+enable_clipping: False
+enable_rand_amp: False
+enable_sign_flip: False
+enable_chunk_swap: False
+enable_babble_noise: False
+
 wav_augment: !new:speechbrain.augment.augmenter.Augmenter
     parallel_augment: False
     concat_original: False
@@ -217,10 +228,28 @@ wav_augment: !new:speechbrain.augment.augmenter.Augmenter
     shuffle_augmentations: False
     min_augmentations: 1
     max_augmentations: 1
-    # Change this to test different augmentations:
-    # Options: sb_add_noise, sb_speed_perturb, sb_drop_freq, sb_drop_chunk,
-    #          sb_clipping, sb_rand_amp, sb_sign_flip, sb_chunk_swap, sb_babble_noise
-    augmentations: [!ref <sb_drop_chunk>]
+    augmentations: [
+        !ref <sb_add_noise>,
+        !ref <sb_speed_perturb>,
+        !ref <sb_drop_freq>,
+        !ref <sb_drop_chunk>,
+        !ref <sb_clipping>,
+        !ref <sb_rand_amp>,
+        !ref <sb_sign_flip>,
+        !ref <sb_chunk_swap>,
+        !ref <sb_babble_noise>
+    ]
+    enable_augmentations: [
+        !ref <enable_add_noise>,
+        !ref <enable_speed_perturb>,
+        !ref <enable_drop_freq>,
+        !ref <enable_drop_chunk>,
+        !ref <enable_clipping>,
+        !ref <enable_rand_amp>,
+        !ref <enable_sign_flip>,
+        !ref <enable_chunk_swap>,
+        !ref <enable_babble_noise>
+    ]
 
 mean_var_norm: !new:speechbrain.processing.features.InputNormalization
     norm_type: sentence
