@@ -1,0 +1,212 @@
+# ################################
+# Isolated Augmentation Testing with wav2aug
+# 
+# This config allows testing individual augmentations in isolation
+# to compare wav2aug performance against SpeechBrain implementations.
+#
+# Usage:
+#   # Test drop_chunk (time_dropout) augmentation:
+#   python train.py hparams/single_aug.yaml --augmentation_name=drop_chunk
+#
+#   # Test drop_freq (frequency dropout) augmentation:
+#   python train.py hparams/single_aug.yaml --augmentation_name=drop_freq
+#
+#   # Test with no augmentation (baseline):
+#   python train.py hparams/single_aug.yaml --augmentation_name=none
+#
+# Available augmentation names:
+#   - add_noise      : Add background noise at random SNR
+#   - speed_perturb  : Speed perturbation (0.9x, 1.0x, 1.1x)
+#   - drop_freq      : Frequency band dropout (notch filtering)
+#   - drop_chunk     : Time dropout (zeroing time segments)
+#   - clipping       : Amplitude clipping
+#   - rand_amp       : Random amplitude scaling
+#   - sign_flip      : Polarity inversion
+#   - chunk_swap     : Swap audio chunks
+#   - babble_noise   : Add babble noise from batch sum
+#   - none           : No augmentation (baseline)
+# ################################
+
+# Basic parameters
+seed: 1986
+__set_seed: !apply:speechbrain.utils.seed_everything [!ref <seed>]
+
+# Use 12 for V2 12 task and 35 for V2 35 task
+number_of_commands: 12
+output_folder: !ref results/single_aug_<augmentation_name>/<seed>
+save_folder: !ref <output_folder>/save
+train_log: !ref <output_folder>/train_log.txt
+
+# Data files
+data_folder: !PLACEHOLDER  # e.g. /path/to/GSC
+train_annotation: !ref <output_folder>/train.csv
+valid_annotation: !ref <output_folder>/valid.csv
+test_annotation: !ref <output_folder>/test.csv
+
+# Data for augmentation
+data_folder_noise: !ref <data_folder>/noise
+NOISE_DATASET_URL: https://www.dropbox.com/scl/fi/a09pj97s5ifan81dqhi4n/noises.zip?rlkey=j8b0n9kdjdr32o1f06t0cw5b7&dl=1
+noise_annotation: !ref <output_folder>/noise.csv
+
+# ============================================================================
+# AUGMENTATION SELECTION - Override via CLI: --augmentation_name=drop_chunk
+# ============================================================================
+augmentation_name: none  # Default: no augmentation
+
+# Waveform Augmentation Values (matching usa.yaml for fair comparison)
+snr_low: 0
+snr_high: 10
+speed_changes: [90, 100, 110]
+drop_freq_low: 0
+drop_freq_high: 1
+drop_freq_count_low: 1
+drop_freq_count_high: 8
+drop_freq_width: 0.1
+drop_chunk_count_low: 1
+drop_chunk_count_high: 8
+drop_chunk_length_low: 0
+drop_chunk_length_high: 4000
+clip_low: 0
+clip_high: 0.75
+amp_low: 0.05
+amp_high: 0.5
+sign_flip_prob: 0.6
+babble_snr_low: 0
+babble_snr_high: 20
+
+# Percentage of files used for validation and test
+validation_percentage: 10
+testing_percentage: 10
+
+# Percentage of unknown and silence examples
+percentage_unknown: 10
+percentage_silence: 10
+
+skip_prep: False
+ckpt_interval_minutes: 15
+
+####################### Training Parameters ####################################
+number_of_epochs: 100
+batch_size: 32
+lr: 0.001
+lr_final: 0.0001
+
+sample_rate: 16000
+shuffle: True
+
+# Feature parameters
+n_mels: 24
+left_frames: 0
+right_frames: 0
+deltas: False
+
+out_n_neurons: !ref <number_of_commands>
+
+num_workers: 4
+dataloader_options:
+    batch_size: !ref <batch_size>
+    shuffle: !ref <shuffle>
+    num_workers: !ref <num_workers>
+
+# Functions
+compute_features: !new:speechbrain.lobes.features.Fbank
+    n_mels: !ref <n_mels>
+    left_frames: !ref <left_frames>
+    right_frames: !ref <right_frames>
+    deltas: !ref <deltas>
+
+embedding_model: !new:speechbrain.lobes.models.Xvector.Xvector
+    in_channels: !ref <n_mels>
+    activation: !name:torch.nn.LeakyReLU
+    tdnn_blocks: 5
+    tdnn_channels: [512, 512, 512, 512, 1500]
+    tdnn_kernel_sizes: [5, 3, 3, 1, 1]
+    tdnn_dilations: [1, 2, 3, 1, 1]
+    lin_neurons: 512
+
+classifier: !new:speechbrain.lobes.models.Xvector.Classifier
+    input_shape: [null, null, 512]
+    activation: !name:torch.nn.LeakyReLU
+    lin_blocks: 1
+    lin_neurons: 512
+    out_neurons: !ref <out_n_neurons>
+
+softmax: !new:speechbrain.nnet.activations.Softmax
+    apply_log: True
+
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+    limit: !ref <number_of_epochs>
+
+# Download and prepare the dataset of noisy sequences for augmentation
+prepare_noise_data: !name:speechbrain.augment.preparation.prepare_dataset_from_URL
+    URL: !ref <NOISE_DATASET_URL>
+    dest_folder: !ref <data_folder_noise>
+    ext: wav
+    csv_file: !ref <noise_annotation>
+
+# ============================================================================
+# wav2aug SingleAugment - Applies one augmentation selected by CLI argument
+# ============================================================================
+wav_augment: !new:wav2aug.gpu.SingleAugment
+    sample_rate: !ref <sample_rate>
+    augmentation_name: !ref <augmentation_name>
+    # Pass all parameters - SingleAugment uses only those relevant to selected aug
+    snr_low: !ref <snr_low>
+    snr_high: !ref <snr_high>
+    speed_changes: !ref <speed_changes>
+    drop_freq_low: !ref <drop_freq_low>
+    drop_freq_high: !ref <drop_freq_high>
+    drop_freq_count_low: !ref <drop_freq_count_low>
+    drop_freq_count_high: !ref <drop_freq_count_high>
+    drop_freq_width: !ref <drop_freq_width>
+    drop_chunk_count_low: !ref <drop_chunk_count_low>
+    drop_chunk_count_high: !ref <drop_chunk_count_high>
+    drop_chunk_length_low: !ref <drop_chunk_length_low>
+    drop_chunk_length_high: !ref <drop_chunk_length_high>
+    clip_low: !ref <clip_low>
+    clip_high: !ref <clip_high>
+    amp_low: !ref <amp_low>
+    amp_high: !ref <amp_high>
+    sign_flip_prob: !ref <sign_flip_prob>
+    babble_snr_low: !ref <babble_snr_low>
+    babble_snr_high: !ref <babble_snr_high>
+
+mean_var_norm: !new:speechbrain.processing.features.InputNormalization
+    norm_type: sentence
+    std_norm: False
+
+modules:
+    compute_features: !ref <compute_features>
+    embedding_model: !ref <embedding_model>
+    classifier: !ref <classifier>
+    softmax: !ref <softmax>
+    mean_var_norm: !ref <mean_var_norm>
+
+# Cost + optimization
+compute_cost: !name:speechbrain.nnet.losses.nll_loss
+
+weight_decay: 0.000002
+opt_class: !name:torch.optim.AdamW
+    lr: !ref <lr>
+    weight_decay: !ref <weight_decay>
+
+lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler
+    initial_value: !ref <lr>
+    final_value: !ref <lr_final>
+    epoch_count: !ref <number_of_epochs>
+
+# Logging + checkpoints
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+    save_file: !ref <train_log>
+
+error_stats: !name:speechbrain.utils.metric_stats.MetricStats
+    metric: !name:speechbrain.nnet.losses.classification_error
+        reduction: batch
+
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+    checkpoints_dir: !ref <save_folder>
+    recoverables:
+        embedding_model: !ref <embedding_model>
+        classifier: !ref <classifier>
+        normalizer: !ref <mean_var_norm>
+        counter: !ref <epoch_counter>
