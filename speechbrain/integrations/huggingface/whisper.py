@@ -21,6 +21,13 @@ from speechbrain.integrations.huggingface.huggingface import (
 )
 from speechbrain.utils.logger import get_logger
 
+# Import cache classes for transformers compatibility
+try:
+    from transformers import EncoderDecoderCache
+    HAS_ENCODER_DECODER_CACHE = True
+except ImportError:
+    HAS_ENCODER_DECODER_CACHE = False
+
 SAMPLE_RATE = 16000
 N_FFT = 400
 HOP_LENGTH = 160
@@ -392,6 +399,9 @@ class Whisper(HFTransformersInterface):
         if past_key_values is not None:
             # if KV cache we do not need to pass the whole past tokens but only t-1
             decoder_input_ids = decoder_input_ids[:, -1].unsqueeze(-1)
+            # Convert tuple to EncoderDecoderCache for transformers >= 4.43
+            if HAS_ENCODER_DECODER_CACHE and isinstance(past_key_values, tuple):
+                past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)
 
         output_states = self.model.decoder(
             encoder_hidden_states=encoder_states,
