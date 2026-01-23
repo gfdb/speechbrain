@@ -56,7 +56,7 @@ augmentation_name: none  # Default: no augmentation
 # Waveform Augmentation Values (matching usa.yaml for fair comparison)
 snr_low: 0
 snr_high: 10
-speed_changes: [90, 100, 110]
+speed_changes: [0.9, 1, 1.1]
 drop_freq_low: 0
 drop_freq_high: 1
 drop_freq_count_low: 1

@@ -150,7 +150,7 @@ sb_add_noise: !new:speechbrain.augment.time_domain.AddNoise
     snr_high: !ref <snr_high>
     noise_sample_rate: !ref <sample_rate>
     clean_sample_rate: !ref <sample_rate>
-    num_workers: 0
+    num_workers: 4
 
 # Speed perturbation
 sb_speed_perturb: !new:speechbrain.augment.time_domain.SpeedPerturb

@@ -108,30 +108,24 @@ class ASR(sb.core.Brain):
         if stage == sb.Stage.TRAIN:
             # Labels must be extended if parallel augmentation or concatenated
             # augmentation was performed on the input (increasing the time dimension)
-            if (
+           if (
                 hasattr(self.hparams, "wav_augment")
                 and self.optimizer_step > self.hparams.augment_warmup
             ):
-                (
-                    tokens,
-                    tokens_lens,
-                    tokens_eos,
-                    tokens_eos_lens,
-                ) = self.hparams.wav_augment.replicate_multiple_labels(
-                    tokens, tokens_lens, tokens_eos, tokens_eos_lens
-                )
+                tokens = self.hparams.wav_augment.replicate_labels(tokens)
+                tokens_lens = self.hparams.wav_augment.replicate_labels(tokens_lens)
+                tokens_eos = self.hparams.wav_augment.replicate_labels(tokens_eos)
+                tokens_eos_lens = self.hparams.wav_augment.replicate_labels(tokens_eos_lens)
+
             if (
                 hasattr(self.hparams, "fea_augment")
                 and self.optimizer_step > self.hparams.augment_warmup
             ):
-                (
-                    tokens,
-                    tokens_lens,
-                    tokens_eos,
-                    tokens_eos_lens,
-                ) = self.hparams.fea_augment.replicate_multiple_labels(
-                    tokens, tokens_lens, tokens_eos, tokens_eos_lens
-                )
+                tokens = self.hparams.fea_augment.replicate_labels(tokens)
+                tokens_lens = self.hparams.fea_augment.replicate_labels(tokens_lens)
+                tokens_eos = self.hparams.fea_augment.replicate_labels(tokens_eos)
+                tokens_eos_lens = self.hparams.fea_augment.replicate_labels(tokens_eos_lens)
+     
 
         loss_seq = self.hparams.seq_cost(
             p_seq, tokens_eos, length=tokens_eos_lens

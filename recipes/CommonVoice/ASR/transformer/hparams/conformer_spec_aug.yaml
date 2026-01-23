@@ -266,32 +266,25 @@ time_warp: !new:speechbrain.augment.freq_domain.Warping
     warp_mode: bicubic
     dim: 1
 
-min_num_aug: 1
-num_aug: 1
-batch_multiplier: 0 # 0/1 -> no batch multiplication
-concat_original: False
-aug_strategy: 'all'
-
 toggle_time_drop: True
 toggle_freq_drop: True
 toggle_time_warp: True
 
-fea_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
+fea_augment: !new:speechbrain.augment.augmenter.Augmenter
+    min_augmentations: 3
+    max_augmentations: 3
+    augment_prob: 1.0
     augmentations: [
         !ref <time_drop>,
         !ref <freq_drop>,
         !ref <time_warp>
     ]
-    min_num_aug: !ref <min_num_aug>
-    num_aug: !ref <num_aug>
-    batch_multiplier: !ref <batch_multiplier>
-    concat_original: !ref <concat_original>
-    aug_strategy: !ref <aug_strategy>
-    aug_toggles: [
+    enable_augmentations: [
         !ref <toggle_time_drop>,
         !ref <toggle_freq_drop>,
         !ref <toggle_time_warp>
     ]
+
 
 compute_features: !new:speechbrain.lobes.features.Fbank
     sample_rate: !ref <sample_rate>

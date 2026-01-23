@@ -41,6 +41,10 @@ class ASR_Brain(sb.Brain):
 
         feats = self.hparams.compute_features(wavs)
         feats = self.modules.normalize(feats, wav_lens)
+        
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            feats, _ = self.hparams.fea_augment(feats, wav_lens)
+        
         out = self.modules.model(feats)
         out = self.modules.output(out)
         pout = self.hparams.log_softmax(out)
@@ -55,6 +59,10 @@ class ASR_Brain(sb.Brain):
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             phns = self.hparams.wav_augment.replicate_labels(phns)
             phn_lens = self.hparams.wav_augment.replicate_labels(phn_lens)
+
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            phns = self.hparams.fea_augment.replicate_labels(phns)
+            phn_lens = self.hparams.fea_augment.replicate_labels(phn_lens)
 
         loss = self.hparams.compute_cost(pout, phns, pout_lens, phn_lens)
         self.ctc_metrics.append(batch.id, pout, phns, pout_lens, phn_lens)
@@ -237,7 +245,6 @@ if __name__ == "__main__":
             "uppercase": hparams["uppercase"],
         },
     )
-    run_on_main(hparams["prepare_noise_data"])
 
     # Dataset IO prep: creating Dataset objects and proper encodings for phones
     train_data, valid_data, test_data, label_encoder = dataio_prep(hparams)

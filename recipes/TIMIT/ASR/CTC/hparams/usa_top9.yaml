@@ -23,7 +23,7 @@ uppercase: False # Must be True when the TIMIT dataset is in the upper-case vers
 ####################### Training Parameters ####################################
 number_of_epochs: 50
 batch_size: 16
-lr: 1.0
+lr: 0.0011
 sorting: ascending # choose between ascending, descending and random
 
 # Feature parameters
@@ -64,48 +64,9 @@ test_dataloader_opts:
 normalize: !new:speechbrain.processing.features.InputNormalization
     norm_type: global
 
-############################## Augmentations ###################################
-
-# Time drop (T = 100 frames)
-time_drop: !new:speechbrain.augment.freq_domain.SpectrogramDrop
-    drop_length_low: 100
-    drop_length_high: 101
-    drop_count_low: 1
-    drop_count_high: 1
-
-# Frequency drop (F = 13~14 on 40 mel bands), scaled from 27 on 80 mel bands
-freq_drop: !new:speechbrain.augment.freq_domain.SpectrogramDrop
-    drop_length_low: 13
-    drop_length_high: 14
-    drop_count_low: 1
-    drop_count_high: 1
-    dim: 2
-
-# Time warp
-time_warp: !new:speechbrain.augment.freq_domain.Warping
-    warp_window: 80
-    warp_mode: bicubic
-    dim: 1
-
-toggle_time_drop: True
-toggle_freq_drop: True
-toggle_time_warp: False
-
-
-fea_augment: !new:speechbrain.augment.augmenter.Augmenter
-    min_augmentations: 3
-    max_augmentations: 3
-    augment_prob: 1.0
-    augmentations: [
-        !ref <time_drop>,
-        !ref <freq_drop>,
-        !ref <time_warp>
-    ]
-    enable_augmentations: [
-        !ref <toggle_time_drop>,
-        !ref <toggle_freq_drop>,
-        !ref <toggle_time_warp>
-    ]
+# ----- WAVEFORM AUGMENTATION ----- #
+wav_augment: !new:wav2aug.gpu.Wav2Aug
+  sample_rate: !ref <sample_rate>
 
 ############################## Models ##########################################
 

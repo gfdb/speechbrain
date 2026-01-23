@@ -199,7 +199,7 @@ checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
 # Load pretrained embedding module
 # Note: in this case, we pre-train with the ECAPA-TDNN model trained on voxceleb
 # for speaker-id (this leads to a performance improvement).
-embedding_model_path: embedding_model.ckpt
+embedding_model_path: speechbrain/spkrec-ecapa-voxceleb/embedding_model.ckpt
 
 # Pretrained ECAPA embeddings from SpeakerID on VoxCeleb
 pretrainer: !new:speechbrain.utils.parameter_transfer.Pretrainer

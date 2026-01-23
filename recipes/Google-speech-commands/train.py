@@ -42,6 +42,9 @@ class SpeakerBrain(sb.core.Brain):
         # Add waveform augmentation if specified.
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
             wavs, lens = self.hparams.wav_augment(wavs, lens)
+        
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav2aug"):
+            wavs, lens = self.hparams.wav2aug(wavs, lens)
 
         if isinstance(
             self.modules.compute_features, speechbrain.lobes.features.Leaf
