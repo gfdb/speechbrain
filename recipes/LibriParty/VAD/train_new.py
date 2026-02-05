@@ -34,10 +34,20 @@ class VADBrain(sb.Brain):
         wavs, lens = batch.signal
         targets, lens_targ = batch.target
         self.targets = targets
+        
+        # Add waveform augmentation if specified.
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
+            wavs, lens = self.hparams.wav_augment(wavs, lens)
+            self.targets = self.hparams.wav_augment.replicate_labels(self.targets)
 
         # From wav input to output binary prediction
         feats = self.hparams.compute_features(wavs)
         feats = self.modules.mean_var_norm(feats, lens)
+        
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            feats, lens = self.hparams.fea_augment(feats, lens)
+            self.targets = self.hparams.fea_augment.replicate_labels(self.targets)
+
         feats = feats.detach()
         outputs = self.modules.cnn(feats)
 
@@ -55,7 +65,7 @@ class VADBrain(sb.Brain):
         "Given the network predictions and targets computed the binary CE"
         predictions, lens = predictions
         targets = self.targets
-
+        
         predictions = predictions[:, : targets.shape[-1], 0]
 
         loss = self.hparams.compute_BCE_cost(predictions, targets, lens)
