@@ -66,7 +66,11 @@ class VADBrain(sb.Brain):
         predictions, lens = predictions
         targets = self.targets
         
-        predictions = predictions[:, : targets.shape[-1], 0]
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
+            targets = self.hparams.wav_augment.transform_frame_labels(targets)
+            predictions = predictions[:, :, 0]
+        else:
+            predictions = predictions[:, : targets.shape[-1], 0]
 
         loss = self.hparams.compute_BCE_cost(predictions, targets, lens)
 
