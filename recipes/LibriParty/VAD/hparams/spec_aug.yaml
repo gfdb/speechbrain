@@ -140,9 +140,10 @@ modules:
     dnn: !ref <dnn>
     mean_var_norm: !ref <mean_var_norm>
 
+weight_decay: 0.01
 opt_class: !name:torch.optim.AdamW
     lr: !ref <lr>
-    weight_decay: 0.01
+    weight_decay: !ref <weight_decay>
 
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
     limit: !ref <N_epochs>
