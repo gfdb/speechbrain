@@ -114,10 +114,12 @@ opt_class: !name:torch.optim.AdamW
     weight_decay: !ref <weight_decay>
 
 
-lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler
+total_steps: 65000
+
+lr_annealing: !new:speechbrain.nnet.schedulers.LinearStepScheduler
     initial_value: !ref <lr>
     final_value: !ref <lr_final>
-    epoch_count: !ref <number_of_epochs>
+    total_steps: !ref <total_steps>
 
 # Logging + checkpoints
 train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
@@ -134,3 +136,4 @@ checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
         classifier: !ref <classifier>
         normalizer: !ref <mean_var_norm>
         counter: !ref <epoch_counter>
+        lr_scheduler: !ref <lr_annealing>

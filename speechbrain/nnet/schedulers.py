@@ -295,6 +295,96 @@ class LinearScheduler:
 
 
 @checkpoints.register_checkpoint_hooks
+class LinearStepScheduler:
+    """Step-based linear learning rate scheduler.
+
+    The learning rate is linearly annealed from ``initial_value`` to
+    ``final_value`` over ``total_steps`` optimizer steps.  It is called
+    once per optimizer step (like :class:`NoamScheduler`), **not** once
+    per epoch.
+
+    Arguments
+    ---------
+    initial_value : float
+        Starting learning rate.
+    final_value : float
+        Final learning rate reached at ``total_steps``.
+    total_steps : int
+        Number of optimizer steps over which the linear decay occurs.
+
+    Example
+    -------
+    >>> from speechbrain.nnet.linear import Linear
+    >>> inp_tensor = torch.rand([1, 660, 3])
+    >>> model = Linear(input_size=3, n_neurons=4)
+    >>> optim = torch.optim.Adam(model.parameters(), lr=1)
+    >>> output = model(inp_tensor)
+    >>> scheduler = LinearStepScheduler(1.0, 0.0, 4)
+    >>> curr_lr, next_lr = scheduler(optim)
+    >>> optim.param_groups[0]["lr"]
+    0.75
+    >>> curr_lr, next_lr = scheduler(optim)
+    >>> optim.param_groups[0]["lr"]
+    0.5
+    >>> curr_lr, next_lr = scheduler(optim)
+    >>> optim.param_groups[0]["lr"]
+    0.25
+    >>> curr_lr, next_lr = scheduler(optim)
+    >>> optim.param_groups[0]["lr"]
+    0.0
+    """
+
+    def __init__(self, initial_value, final_value, total_steps):
+        self.initial_value = initial_value
+        self.final_value = final_value
+        self.total_steps = total_steps
+        self.n_steps = 0
+        self.current_lr = initial_value
+
+    def __call__(self, opt):
+        """Update the learning rate in the optimizer.
+
+        Arguments
+        ---------
+        opt : optimizer
+            The optimizer to update using this scheduler.
+
+        Returns
+        -------
+        current_lr : float
+            The learning rate before the update.
+        lr : float
+            The learning rate after the update.
+        """
+        self.n_steps += 1
+
+        current_lr = opt.param_groups[0]["lr"]
+
+        # Linear interpolation clamped at total_steps
+        progress = min(self.n_steps / self.total_steps, 1.0)
+        lr = self.initial_value + (self.final_value - self.initial_value) * progress
+
+        for param_group in opt.param_groups:
+            param_group["lr"] = lr
+
+        self.current_lr = lr
+        return current_lr, lr
+
+    @checkpoints.mark_as_saver
+    def save(self, path):
+        """Saves the current metrics on the specified path."""
+        data = {"n_steps": self.n_steps}
+        torch.save(data, path)
+
+    @checkpoints.mark_as_loader
+    def load(self, path, end_of_epoch=False):
+        """Loads the needed information."""
+        del end_of_epoch  # Unused in this class
+        data = torch.load(path)
+        self.n_steps = data["n_steps"]
+
+
+@checkpoints.register_checkpoint_hooks
 class LinearWarmupScheduler:
     """Create a schedule with a learning rate that decreases linearly
     from the initial lr set in the optimizer to 0, after

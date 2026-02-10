@@ -108,7 +108,7 @@ class ASR(sb.core.Brain):
         if stage == sb.Stage.TRAIN:
             # Labels must be extended if parallel augmentation or concatenated
             # augmentation was performed on the input (increasing the time dimension)
-           if (
+            if (
                 hasattr(self.hparams, "wav_augment")
                 and self.optimizer_step > self.hparams.augment_warmup
             ):
