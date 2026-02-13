@@ -78,6 +78,8 @@ class NewAugmenter(nn.Module):
 
         if not self.augmentations and self.concat_original:
             out = torch.cat([x, x], dim=0)
+            if lengths is None:
+                return out
             out_lens = torch.cat([lengths, lengths], dim=0)
             return out, out_lens
         if not self.augmentations:
@@ -215,6 +217,9 @@ class NewAugmenter(nn.Module):
                 return batch_copies[0]
             return batch_copies[0], length_copies[0]
         
+        if lengths is None:
+            return torch.cat(batch_copies, dim=0)
+
         outputs, out_lens = self.concatenate_outputs(batch_copies, length_copies) 
         return outputs, out_lens 
 
