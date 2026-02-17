@@ -58,7 +58,7 @@ wav_augment: !new:wav2aug.gpu.Wav2AugViews
     augmenter: !ref <wav2aug>
     views: 4
 
-dirtly_kl_weight: 1e-2
+kl_weight: 1e-2
 
 ####################### Model Parameters #######################################
 encoder_dim: 768

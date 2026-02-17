@@ -68,7 +68,7 @@ spec_aug_views: 4
 # Override from CLI: --num_clean_views 1
 num_clean_views: 1
 
-dirty_kl_weight: 1e-2 
+kl_weight: 1e-2 
 
 ####################### Model Parameters #######################################
 encoder_dim: 768

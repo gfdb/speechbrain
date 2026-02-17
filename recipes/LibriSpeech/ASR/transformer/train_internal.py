@@ -36,17 +36,17 @@ Authors
 
 import logging
 import os
+import random
 import sys
 from pathlib import Path
 
 import torch
-import random
+import torch.nn.functional as F
 from hyperpyyaml import load_hyperpyyaml
 
 import speechbrain as sb
-from speechbrain.utils.distributed import if_main_process, run_on_main
-import torch.nn.functional as F
 from speechbrain.dataio.dataset import FilteredSortedDynamicItemDataset
+from speechbrain.utils.distributed import if_main_process, run_on_main
 
 logger = logging.getLogger(__name__)
 
