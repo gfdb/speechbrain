@@ -111,21 +111,22 @@ class EmoIdBrain(sb.Brain):
 
         loss = self.hparams.compute_cost(log_probs, emoid)
         
-        # assumes final bs will be 4
-        clean = logits[0]
-        dirty1 = logits[1]
-        dirty2 = logits[2]
-        dirty3 = logits[3]
+        if stage == sb.Stage.TRAIN:
+            # assumes final bs will be 4
+            clean = logits[0]
+            dirty1 = logits[1]
+            dirty2 = logits[2]
+            dirty3 = logits[3]
 
-        p_clean = F.softmax(clean, dim=-1).detach()
-        
-        kl_loss = F.kl_div(F.log_softmax(dirty1, dim=-1), p_clean, reduction="batchmean")
-        kl_loss += F.kl_div(F.log_softmax(dirty2, dim=-1), p_clean, reduction="batchmean")
-        kl_loss += F.kl_div(F.log_softmax(dirty3, dim=-1), p_clean, reduction="batchmean")
+            p_clean = F.softmax(clean, dim=-1).detach()
+            
+            kl_loss = F.kl_div(F.log_softmax(dirty1, dim=-1), p_clean, reduction="batchmean")
+            kl_loss += F.kl_div(F.log_softmax(dirty2, dim=-1), p_clean, reduction="batchmean")
+            kl_loss += F.kl_div(F.log_softmax(dirty3, dim=-1), p_clean, reduction="batchmean")
 
-        kl_loss = kl_loss / 3
+            kl_loss = kl_loss / 3
 
-        loss = loss + (self.hparams.kl_weight * kl_loss)
+            loss = loss + (self.hparams.kl_weight * kl_loss)
 
         if stage != sb.Stage.TRAIN:
             self.error_metrics.append(batch.id, predictions, emoid)
