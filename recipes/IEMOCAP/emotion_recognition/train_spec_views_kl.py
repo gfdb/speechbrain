@@ -129,7 +129,7 @@ class EmoIdBrain(sb.Brain):
             loss = loss + (self.hparams.kl_weight * kl_loss)
 
         if stage != sb.Stage.TRAIN:
-            self.error_metrics.append(batch.id, predictions, emoid)
+            self.error_metrics.append(batch.id, log_probs, emoid)
 
         return loss
 
