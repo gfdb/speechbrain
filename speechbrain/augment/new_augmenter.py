@@ -76,16 +76,19 @@ class NewAugmenter(nn.Module):
         device = x.device
         original_bs = x.shape[0]
 
-        if not self.augmentations and self.concat_original:
-            out = torch.cat([x, x], dim=0)
-            if lengths is None:
-                return out
-            out_lens = torch.cat([lengths, lengths], dim=0)
-            return out, out_lens
+        # Handle case where all augmentations are disabled
         if not self.augmentations:
+            num_copies = self.batch_multiplier + int(self.concat_original)
+            if num_copies == 1:
+                if lengths is None:
+                    return x
+                return x, lengths
+            
+            # Concatenate num_copies of the batch
             if lengths is None:
-                return x
-            return x, lengths
+                return torch.cat([x] * num_copies, dim=0)
+            out_lens = torch.cat([lengths] * num_copies, dim=0)
+            return torch.cat([x] * num_copies, dim=0), out_lens
 
         # create list of batch copies
         batch_copies = []
