@@ -113,36 +113,38 @@ class ASR(sb.core.Brain):
         )
 
         if stage == sb.Stage.TRAIN:
-            # 2 clean, 3 dirty views (each view has 2 items)
+            # Expected layout: [clean0, clean1, d1_0, d1_1, d2_0, d2_1, d3_0, d3_1]
             clean  = seq_logits[:2]   # [2, U, V]
             dirty1 = seq_logits[2:4]  # [2, U, V]
             dirty2 = seq_logits[4:6]  # [2, U, V]
             dirty3 = seq_logits[6:8]  # [2, U, V]
 
-            # lengths for the clean items (must match corresponding dirty views)
-            lens = tokens_eos_lens[:2]  # [2]
+            U = clean.size(1)
+
+            # tokens_eos_lens are relative in [0,1], normalized by U_max (== U here)
+            lens_rel = tokens_eos_lens[:2]  # [2]
+            lens_steps = (lens_rel * U).round().long().clamp(min=1, max=U)  # [2]
 
             # teacher distribution (stop-grad)
             p_clean = F.softmax(clean, dim=-1).detach()  # [2, U, V]
 
+            # padding mask over token steps
+            step_ids = torch.arange(U, device=clean.device)[None, :]        # [1, U]
+            mask = (step_ids < lens_steps[:, None]).float()                 # [2, U]
+
             def masked_kl(student_logits: torch.Tensor) -> torch.Tensor:
-                # student log-probs
-                log_p_student = F.log_softmax(student_logits, dim=-1)  # [2, U, V]
+                # student log-probs over vocab
+                log_p_student = F.log_softmax(student_logits, dim=-1)        # [2, U, V]
 
-                # KL per token step: [2, U, V] -> sum over V -> [2, U]
-                kl = F.kl_div(log_p_student, p_clean, reduction="none").sum(dim=-1)
+                # KL per step: sum over vocab -> [2, U]
+                kl_per_step = F.kl_div(log_p_student, p_clean, reduction="none").sum(dim=-1)
 
-                # mask padding over U
-                U = kl.size(1)
-                mask = (torch.arange(U, device=kl.device)[None, :] < lens[:, None]).float()  # [2, U]
+                # average only over valid (non-pad) steps
+                return (kl_per_step * mask).sum() / mask.sum().clamp_min(1.0)
 
-                # normalize by number of valid token steps (not by U_max)
-                return (kl * mask).sum() / mask.sum().clamp_min(1.0)
+            kl_loss = (masked_kl(dirty1) + masked_kl(dirty2) + masked_kl(dirty3)) / 3.0
 
-            kl_loss = masked_kl(dirty1) + masked_kl(dirty2) + masked_kl(dirty3)
-            kl_loss = kl_loss / 3.0
-
-            loss = loss + (self.hparams.kl_weight * kl_loss)
+            loss = loss + float(self.hparams.kl_weight) * kl_loss
 
 
         if stage != sb.Stage.TRAIN:
