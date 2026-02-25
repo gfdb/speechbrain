@@ -18,128 +18,112 @@ import torch.nn as nn
 class SpectrogramDrop(nn.Module):
     def __init__(
         self,
-        drop_length_low=5,
-        drop_length_high=15,   # this corresponds to SpecAugment "T" (time) or "F" (freq)
-        drop_count_low=1,
-        drop_count_high=3,
-        replace="zeros",
-        dim=1,
-        max_ratio=None,        # <-- this is SpecAugment "p" for time masking (e.g., 1.0 or 0.2)
+        mask_len: int,        # fixed T (time) or F (freq)
+        num_masks: int,       # fixed mT or mF
+        dim: int = 1,         # 1=time, 2=freq
+        max_ratio: float | None = None,  # p (time masking only)
     ):
         super().__init__()
-        self.drop_length_low = drop_length_low
-        self.drop_length_high = drop_length_high
-        self.drop_count_low = drop_count_low
-        self.drop_count_high = drop_count_high
-        self.replace = replace
+
+        if mask_len < 0:
+            raise ValueError("mask_len must be >= 0")
+        if num_masks < 0:
+            raise ValueError("num_masks must be >= 0")
+        if dim not in (1, 2):
+            raise ValueError("dim must be 1 (time) or 2 (freq)")
+        if max_ratio is not None and not (0.0 < float(max_ratio) <= 1.0):
+            raise ValueError("max_ratio (p) must be in (0, 1]")
+
+        self.mask_len = int(mask_len)
+        self.num_masks = int(num_masks)
         self.dim = dim
         self.max_ratio = max_ratio
 
-        if drop_length_low > drop_length_high:
-            raise ValueError("Low limit must not be more than high limit")
-        if drop_count_low > drop_count_high:
-            raise ValueError("Low limit must not be more than high limit")
+    def forward(
+        self,
+        spectrogram: torch.Tensor,
+        lengths: torch.Tensor | None = None,
+    ) -> torch.Tensor:
 
-        self.replace_opts = ["zeros", "mean", "rand", "cutcat", "swap", "random_selection"]
-        if self.replace not in self.replace_opts:
-            raise ValueError(f"Invalid 'replace' option. Select one of {', '.join(self.replace_opts)}")
+        orig_shape = spectrogram.shape
 
-        if self.max_ratio is not None:
-            if not (0.0 < float(self.max_ratio) <= 1.0):
-                raise ValueError("max_ratio (p) must be in (0, 1].")
-
-    def forward(self, spectrogram: torch.Tensor, lengths: torch.Tensor | None = None) -> torch.Tensor:
-        # Manage 4D tensors
+        # Accept [B,T,F] or [B,C,T,F]
+        folded = False
         if spectrogram.dim() == 4:
-            spectrogram = spectrogram.view(-1, spectrogram.shape[2], spectrogram.shape[3])
+            b, c, t, f = spectrogram.shape
+            spectrogram = spectrogram.reshape(b * c, t, f)
+            folded = True
+        elif spectrogram.dim() != 3:
+            raise ValueError("Input must be [B,T,F] or [B,C,T,F]")
 
-        batch_size, time_duration, fea_size = spectrogram.shape
-        D = time_duration if self.dim == 1 else fea_size
+        B, T, F = spectrogram.shape
+        D = T if self.dim == 1 else F
 
-        # n_masks: same for all samples (matches common SpecAugment impls)
-        n_masks = int(torch.randint(
-            low=self.drop_count_low,
-            high=self.drop_count_high + 1,
-            size=(1,),
-            device=spectrogram.device,
-        ).item())
-        if n_masks == 0:
-            return spectrogram
+        if self.num_masks == 0 or self.mask_len == 0:
+            return spectrogram.reshape(orig_shape) if folded else spectrogram
 
-        # Determine per-sample effective length tau_i (only relevant for time masking)
+        # Effective length (for time masking only)
         if self.dim == 1 and lengths is not None:
-            # lengths can be either relative (0..1) or absolute frames; handle both safely:
             if lengths.dtype.is_floating_point:
-                tau = torch.clamp((lengths * time_duration).floor().long(), min=1, max=time_duration)
+                tau = torch.clamp((lengths * T).floor().long(), min=1, max=T)
             else:
-                tau = torch.clamp(lengths.long(), min=1, max=time_duration)
+                tau = torch.clamp(lengths.long(), min=1, max=T)
         else:
-            tau = torch.full((batch_size,), D, device=spectrogram.device, dtype=torch.long)
+            tau = torch.full((B,), D, device=spectrogram.device, dtype=torch.long)
 
-        # Compute per-sample max allowed mask length: min(T, floor(p * tau_i))
-        # Only apply the p cap for time masking. For freq masking, SpecAugment doesn't use p.
+        # Apply p cap if provided (time masking only)
         if self.dim == 1 and self.max_ratio is not None:
-            max_len = torch.minimum(
-                torch.full((batch_size,), self.drop_length_high, device=spectrogram.device, dtype=torch.long),
-                torch.clamp((tau.float() * float(self.max_ratio)).floor().long(), min=1),
+            max_len = torch.clamp(
+                (tau.float() * float(self.max_ratio)).floor().long(),
+                min=0,
+            )
+            mask_len = torch.minimum(
+                torch.full_like(max_len, self.mask_len),
+                max_len,
             )
         else:
-            max_len = torch.full((batch_size,), self.drop_length_high, device=spectrogram.device, dtype=torch.long)
+            mask_len = torch.full((B,), self.mask_len,
+                                  device=spectrogram.device,
+                                  dtype=torch.long)
 
-        # If max_len < low for some samples, clamp so sampling remains valid
-        low = int(self.drop_length_low)
-        max_len = torch.clamp(max_len, min=low)
+        arange = torch.arange(D, device=spectrogram.device).view(1, 1, -1)
 
-        # Sample mask lengths per (sample, mask)
-        # randint high is exclusive, so use max_len+1
-        u = torch.rand((batch_size, n_masks), device=spectrogram.device)
-        mask_len = (low + torch.floor(u * (max_len.unsqueeze(1) - low + 1).float())).long()  # [B, M]
+        total_mask = torch.zeros((B, D),
+                                 device=spectrogram.device,
+                                 dtype=torch.bool)
 
-        # Sample start positions per (sample, mask): pos in [0, tau_i - mask_len]
-        # Ensure non-negative range:
-        max_pos = torch.clamp(tau.unsqueeze(1) - mask_len, min=0)  # [B, M]
-        u2 = torch.rand((batch_size, n_masks), device=spectrogram.device)
-        mask_pos = torch.floor(u2 * (max_pos + 1).float()).long()  # [B, M]
+        for _ in range(self.num_masks):
 
-        # Build boolean mask on dimension D (padded width), but only mask within tau_i
-        arange = torch.arange(D, device=spectrogram.device).view(1, 1, -1)  # [1,1,D]
-        pos = mask_pos.unsqueeze(-1)  # [B,M,1]
-        leng = mask_len.unsqueeze(-1)  # [B,M,1]
-        m = (pos <= arange) & (arange < (pos + leng))  # [B,M,D]
-        m = m.any(dim=1)  # [B,D]
+            # sample start uniformly in [0, tau - mask_len]
+            max_pos = torch.clamp(tau - mask_len, min=0)
+            start = torch.randint(
+                low=0,
+                high=(max_pos + 1),
+                size=(B,),
+                device=spectrogram.device,
+            )
 
-        # Also ensure we don't mask beyond true length for each sample (time masking case)
+            pos = start.view(B, 1, 1)
+            leng = mask_len.view(B, 1, 1)
+
+            m = (pos <= arange) & (arange < (pos + leng))
+            m = m.squeeze(1)
+
+            # don't mask beyond true length (time case)
+            if self.dim == 1:
+                valid = arange.squeeze(0).squeeze(0).unsqueeze(0) < tau.unsqueeze(1)
+                m = m & valid
+
+            total_mask |= m
+
         if self.dim == 1:
-            valid = arange.squeeze(0).squeeze(0).unsqueeze(0) < tau.unsqueeze(1)  # [B,D]
-            m = m & valid
+            mask = total_mask.unsqueeze(2)  # [B,T,1]
+        else:
+            mask = total_mask.unsqueeze(1)  # [B,1,F]
 
-        # Expand to spectrogram shape
-        mask = m.unsqueeze(2) if self.dim == 1 else m.unsqueeze(1)  # [B,T,1] or [B,1,F]
+        out = spectrogram.masked_fill(mask, 0.0)
 
-        # Replacement (unchanged from your logic, but avoid mutating self.replace permanently)
-        replace_mode = self.replace
-        if replace_mode == "random_selection":
-            replace_mode = random.choice(self.replace_opts[:-1])
-
-        if replace_mode == "zeros":
-            spectrogram = spectrogram.masked_fill(mask, 0.0)
-        elif replace_mode == "mean":
-            mean = spectrogram.mean().detach()
-            spectrogram = spectrogram.masked_fill(mask, mean)
-        elif replace_mode == "rand":
-            mx = spectrogram.max().detach()
-            mn = spectrogram.min().detach()
-            r = torch.rand_like(spectrogram) * (mx - mn) + mn
-            spectrogram = torch.where(mask, r, spectrogram)
-        elif replace_mode == "cutcat":
-            rolled = torch.roll(spectrogram, shifts=1, dims=0)
-            spectrogram = torch.where(mask, rolled, spectrogram)
-        elif replace_mode == "swap":
-            shift = int(torch.randint(low=1, high=spectrogram.shape[1], size=(1,), device=spectrogram.device).item())
-            rolled = torch.roll(spectrogram, shifts=shift, dims=1)
-            spectrogram = torch.where(mask, rolled, spectrogram)
-
-        return spectrogram
+        return out.reshape(orig_shape) if folded else out
 
 
 class Warping(torch.nn.Module):
