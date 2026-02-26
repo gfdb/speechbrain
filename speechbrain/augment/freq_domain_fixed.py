@@ -14,116 +14,131 @@ import random
 import torch
 import torch.nn as nn
 
+def _to_frame_lengths(
+    lengths: torch.Tensor | None,
+    max_frames: int,
+    batch_size: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Convert relative or absolute lengths to absolute frame lengths.
+
+    Args:
+        lengths (torch.Tensor | None): If float and <= 1, treated as relative in [0, 1].
+            Otherwise treated as absolute frame counts. Shape [B].
+        max_frames (int): Total frames T in the input tensor.
+        batch_size (int): Batch size B.
+        device (torch.device): Target device.
+
+    Returns:
+        torch.Tensor: Absolute frame lengths [B] (long), clamped to [1, T].
+    """
+    if lengths is None:
+        return torch.full((batch_size,), max_frames, dtype=torch.long, device=device)
+
+    lengths = lengths.to(device)
+    if lengths.numel() != batch_size:
+        raise ValueError(f"Expected lengths with {batch_size} elements, got {lengths.numel()}.")
+
+    if torch.is_floating_point(lengths) and torch.max(lengths) <= 1.0 + 1e-6:
+        frame_lengths = torch.round(lengths * max_frames).long()
+    else:
+        frame_lengths = lengths.long()
+
+    return torch.clamp(frame_lengths, min=1, max=max_frames)
+
 
 class SpectrogramDrop(nn.Module):
+    """SpecAugment-style masking (time or frequency), zero-fill only.
+
+    Args:
+        mask_len (int, optional): Maximum mask length (T for time, F for freq). Defaults to 15.
+        num_masks (int, optional): Number of masks to apply. Defaults to 2.
+        dim (int, optional): 1 => time masking, 2 => frequency masking. Defaults to 1.
+        max_ratio (float | None, optional): For time masking only: additionally cap mask_len
+            by int(max_ratio * valid_frames). (SpecAugment uses p; LB uses p=1.0).
+            Defaults to None.
+        replace (str, optional): Must be "zeros". Defaults to "zeros".
+
+    Returns:
+        torch.Tensor: Masked spectrogram of shape [B, T, F].
+    """
+
     def __init__(
         self,
-        mask_len: int,        # fixed T (time) or F (freq)
-        num_masks: int,       # fixed mT or mF
-        dim: int = 1,         # 1=time, 2=freq
-        max_ratio: float | None = None,  # p (time masking only)
-    ):
+        mask_len: int = 15,
+        num_masks: int = 2,
+        dim: int = 1,
+        max_ratio: float | None = None,
+        replace: str = "zeros",
+    ) -> None:
         super().__init__()
-
-        if mask_len < 0:
-            raise ValueError("mask_len must be >= 0")
-        if num_masks < 0:
-            raise ValueError("num_masks must be >= 0")
+        if replace != "zeros":
+            raise ValueError('SpecAugment masking baseline should be zeros only (replace="zeros").')
         if dim not in (1, 2):
-            raise ValueError("dim must be 1 (time) or 2 (freq)")
-        if max_ratio is not None and not (0.0 < float(max_ratio) <= 1.0):
-            raise ValueError("max_ratio (p) must be in (0, 1]")
-
+            raise ValueError("dim must be 1 (time) or 2 (freq).")
         self.mask_len = int(mask_len)
         self.num_masks = int(num_masks)
-        self.dim = dim
+        self.dim = int(dim)
         self.max_ratio = max_ratio
+        self.replace = replace
 
-    def forward(
-        self,
-        spectrogram: torch.Tensor,
-        lengths: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    def forward(self, spectrogram: torch.Tensor, lengths: torch.Tensor | None = None) -> torch.Tensor:
+        """Apply masking.
 
-        orig_shape = spectrogram.shape
+        Args:
+            spectrogram (torch.Tensor): Input spectrogram [B, T, F].
+            lengths (torch.Tensor | None, optional): Relative [0,1] or absolute frame lengths [B].
+                Used only for time masking to avoid touching padding. Defaults to None.
 
-        # Accept [B,T,F] or [B,C,T,F]
-        folded = False
-        if spectrogram.dim() == 4:
-            b, c, t, f = spectrogram.shape
-            spectrogram = spectrogram.reshape(b * c, t, f)
-            folded = True
-        elif spectrogram.dim() != 3:
-            raise ValueError("Input must be [B,T,F] or [B,C,T,F]")
+        Returns:
+            torch.Tensor: Masked spectrogram [B, T, F].
+        """
+        if spectrogram.dim() != 3:
+            raise ValueError(f"Expected [B, T, F], got {tuple(spectrogram.shape)}.")
 
-        B, T, F = spectrogram.shape
-        D = T if self.dim == 1 else F
+        B, T, Fdim = spectrogram.shape
+        out = spectrogram.clone()
 
-        if self.num_masks == 0 or self.mask_len == 0:
-            return spectrogram.reshape(orig_shape) if folded else spectrogram
+        if self.mask_len <= 0 or self.num_masks <= 0:
+            return out
 
-        # Effective length (for time masking only)
-        if self.dim == 1 and lengths is not None:
-            if lengths.dtype.is_floating_point:
-                tau = torch.clamp((lengths * T).floor().long(), min=1, max=T)
-            else:
-                tau = torch.clamp(lengths.long(), min=1, max=T)
-        else:
-            tau = torch.full((B,), D, device=spectrogram.device, dtype=torch.long)
-
-        # Apply p cap if provided (time masking only)
-        if self.dim == 1 and self.max_ratio is not None:
-            max_len = torch.clamp(
-                (tau.float() * float(self.max_ratio)).floor().long(),
-                min=0,
-            )
-            mask_len = torch.minimum(
-                torch.full_like(max_len, self.mask_len),
-                max_len,
-            )
-        else:
-            mask_len = torch.full((B,), self.mask_len,
-                                  device=spectrogram.device,
-                                  dtype=torch.long)
-
-        arange = torch.arange(D, device=spectrogram.device).view(1, 1, -1)
-
-        total_mask = torch.zeros((B, D),
-                                 device=spectrogram.device,
-                                 dtype=torch.bool)
-
-        for _ in range(self.num_masks):
-
-            # sample start uniformly in [0, tau - mask_len]
-            max_pos = torch.clamp(tau - mask_len, min=0)
-            start = torch.randint(
-                low=0,
-                high=(max_pos + 1),
-                size=(B,),
-                device=spectrogram.device,
-            )
-
-            pos = start.view(B, 1, 1)
-            leng = mask_len.view(B, 1, 1)
-
-            m = (pos <= arange) & (arange < (pos + leng))
-            m = m.squeeze(1)
-
-            # don't mask beyond true length (time case)
-            if self.dim == 1:
-                valid = arange.squeeze(0).squeeze(0).unsqueeze(0) < tau.unsqueeze(1)
-                m = m & valid
-
-            total_mask |= m
+        dev = spectrogram.device
 
         if self.dim == 1:
-            mask = total_mask.unsqueeze(2)  # [B,T,1]
-        else:
-            mask = total_mask.unsqueeze(1)  # [B,1,F]
+            valid_T = _to_frame_lengths(lengths, T, B, dev)
 
-        out = spectrogram.masked_fill(mask, 0.0)
+            for b in range(B):
+                L = int(valid_T[b].item())
+                if L <= 1:
+                    continue
 
-        return out.reshape(orig_shape) if folded else out
+                max_len = min(self.mask_len, L)
+                if self.max_ratio is not None:
+                    max_len = min(max_len, int(self.max_ratio * L))
+                if max_len <= 0:
+                    continue
+
+                for _ in range(self.num_masks):
+                    ml = int(torch.randint(0, max_len + 1, (1,), device=dev).item())
+                    if ml == 0 or (L - ml) <= 0:
+                        continue
+                    start = int(torch.randint(0, L - ml + 1, (1,), device=dev).item())
+                    out[b, start : start + ml, :] = 0
+
+        else:  # dim == 2, frequency masking
+            max_len = min(self.mask_len, Fdim)
+            if max_len <= 0:
+                return out
+
+            for b in range(B):
+                for _ in range(self.num_masks):
+                    ml = int(torch.randint(0, max_len + 1, (1,), device=dev).item())
+                    if ml == 0 or (Fdim - ml) <= 0:
+                        continue
+                    start = int(torch.randint(0, Fdim - ml + 1, (1,), device=dev).item())
+                    out[b, :, start : start + ml] = 0
+
+        return out
 
 
 class Warping(torch.nn.Module):
