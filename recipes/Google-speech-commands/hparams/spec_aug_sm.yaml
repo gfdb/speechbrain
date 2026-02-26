@@ -1,0 +1,171 @@
+# ################################
+# Model: Classification with xvector
+# Augmentation: SpecAugment (Switchboard Mild policy)
+# Authors: Hwidong Na & Mirco Ravanelli
+#          Script adapted by David Raby-Pepin 2021
+# ################################
+
+# Basic parameters
+seed: 1986
+__set_seed: !apply:speechbrain.utils.seed_everything [!ref <seed>]
+
+# Use 12 for V2 12 task and 35 for V2 35 task
+number_of_commands: 12
+output_folder: !ref results/xvect_v<number_of_commands>/<seed>
+save_folder: !ref <output_folder>/save
+train_log: !ref <output_folder>/train_log.txt
+
+# Data files
+data_folder: !PLACEHOLDER  # e.g. /path/to/GSC
+data_folder_noise: !ref <data_folder>/noise # The noisy sequences for data augmentation will automatically be downloaded here.
+data_folder_rir: !ref <data_folder>/rir # The impulse responses used for data augmentation will automatically be downloaded here.
+train_annotation: !ref <output_folder>/train.csv
+valid_annotation: !ref <output_folder>/valid.csv
+test_annotation: !ref <output_folder>/test.csv
+
+# Percentage of files used for validation and test
+validation_percentage: 10
+testing_percentage: 10
+
+# Percentage of unknown and silence examples
+# (relative to total of known word samples) to include
+percentage_unknown: 10 # Set this to 0 for the V2 35 task
+percentage_silence: 10 # Set this to 0 for the V2 35 task
+
+skip_prep: False
+ckpt_interval_minutes: 15 # save checkpoint every N min
+
+####################### Training Parameters ####################################
+number_of_epochs: 100
+batch_size: 32
+lr: 0.001
+lr_final: 0.0001
+
+sample_rate: 16000
+shuffle: True
+
+
+# Feature parameters
+n_mels: 24
+left_frames: 0
+right_frames: 0
+deltas: False
+
+# Number of classes (i.e. different commands)
+out_n_neurons: !ref <number_of_commands>  #includes core commands & auxiliary words
+
+num_workers: 4
+dataloader_options:
+    batch_size: !ref <batch_size>
+    shuffle: !ref <shuffle>
+    num_workers: !ref <num_workers>
+
+# Functions
+compute_features: !new:speechbrain.lobes.features.Fbank
+    n_mels: !ref <n_mels>
+    left_frames: !ref <left_frames>
+    right_frames: !ref <right_frames>
+    deltas: !ref <deltas>
+
+embedding_model: !new:speechbrain.lobes.models.Xvector.Xvector
+    in_channels: !ref <n_mels>
+    activation: !name:torch.nn.LeakyReLU
+    tdnn_blocks: 5
+    tdnn_channels: [512, 512, 512, 512, 1500]
+    tdnn_kernel_sizes: [5, 3, 3, 1, 1]
+    tdnn_dilations: [1, 2, 3, 4, 1]
+    lin_neurons: 512
+
+classifier: !new:speechbrain.lobes.models.Xvector.Classifier
+    input_shape: [null, null, 512]
+    activation: !name:torch.nn.LeakyReLU
+    lin_blocks: 1
+    lin_neurons: 512
+    out_neurons: !ref <out_n_neurons>
+
+softmax: !new:speechbrain.nnet.activations.Softmax
+    apply_log: True
+
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+    limit: !ref <number_of_epochs>
+
+############################## Augmentations ###################################
+# SpecAugment Switchboard Mild (SM) policy
+# W = 40, F = 15, mF = 2, T = 70, p = 0.2, mT = 2
+
+time_drop: !new:speechbrain.augment.freq_domain_fixed.SpectrogramDrop
+    mask_len: 70
+    num_masks: 2
+    dim: 1
+    max_ratio: 0.2
+
+freq_drop: !new:speechbrain.augment.freq_domain_fixed.SpectrogramDrop
+    mask_len: 15
+    num_masks: 2
+    dim: 2
+
+time_warp: !new:speechbrain.augment.freq_domain_fixed.Warping
+    warp_window: 40
+    warp_mode: bicubic
+    dim: 1
+
+toggle_time_drop: True
+toggle_freq_drop: True
+toggle_time_warp: True
+
+fea_augment: !new:speechbrain.augment.augmenter.Augmenter
+    min_augmentations: 3
+    max_augmentations: 3
+    augment_prob: 1.0
+    augmentations: [
+        !ref <time_drop>,
+        !ref <freq_drop>,
+        !ref <time_warp>
+    ]
+    enable_augmentations: [
+        !ref <toggle_time_drop>,
+        !ref <toggle_freq_drop>,
+        !ref <toggle_time_warp>
+    ]
+
+mean_var_norm: !new:speechbrain.processing.features.InputNormalization
+    norm_type: sentence
+    std_norm: False
+
+modules:
+    compute_features: !ref <compute_features>
+    embedding_model: !ref <embedding_model>
+    classifier: !ref <classifier>
+    softmax: !ref <softmax>
+    mean_var_norm: !ref <mean_var_norm>
+
+
+# Cost + optimization
+compute_cost: !name:speechbrain.nnet.losses.nll_loss
+# compute_error: !name:speechbrain.nnet.losses.classification_error
+
+weight_decay: 0.000002
+opt_class: !name:torch.optim.AdamW
+    lr: !ref <lr>
+    weight_decay: !ref <weight_decay>
+
+lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler
+    initial_value: !ref <lr>
+    final_value: !ref <lr_final>
+    epoch_count: !ref <number_of_epochs>
+
+# Logging + checkpoints
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+    save_file: !ref <train_log>
+
+error_stats: !name:speechbrain.utils.metric_stats.MetricStats
+    metric: !name:speechbrain.nnet.losses.classification_error
+        reduction: batch
+
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+    checkpoints_dir: !ref <save_folder>
+    recoverables:
+        embedding_model: !ref <embedding_model>
+        classifier: !ref <classifier>
+        normalizer: !ref <mean_var_norm>
+        counter: !ref <epoch_counter>
