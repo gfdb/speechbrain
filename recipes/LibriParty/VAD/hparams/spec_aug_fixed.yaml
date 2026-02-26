@@ -1,0 +1,163 @@
+# ##################################################################################################
+# Model: VAD on LibriParty with CRDNN.
+# No on-the-fly data augmentation. Optimizer: AdamW.
+# Authors: Mohamed Kleit 2021
+#          Arjun V 2021
+#          Mirco Ravanelli 2021
+# ##################################################################################################
+
+# Seed and output folders
+seed: 1986
+__set_seed: !apply:speechbrain.utils.seed_everything [!ref <seed>]
+output_folder: !ref results/VAD_CRDNN_noaug_adamw/<seed>
+save_folder: !ref <output_folder>/save
+train_log: !ref <output_folder>/train_log.txt
+
+# LibriParty (main data)
+data_folder: !PLACEHOLDER  # e.g. /path/to/LibriParty
+
+# Manifest files (created by the data preparation)
+annotation_train: !ref <save_folder>/train.json
+annotation_valid: !ref <save_folder>/valid.json
+annotation_test: !ref <save_folder>/test.json
+skip_prep: False # Skip data preparation
+
+####################### Training Parameters ####################################
+N_epochs: 100
+lr: 0.001
+lr_final: 0.0001
+batch_size: 2
+example_length: 5 # in seconds
+sample_rate: 16000
+time_resolution: 0.01 # in seconds
+
+num_workers: 4
+train_dataloader_opts:
+    batch_size: !ref <batch_size>
+    num_workers: !ref <num_workers>
+valid_dataloader_opts:
+    batch_size: !ref <batch_size>
+    num_workers: !ref <num_workers>
+test_dataloader_opts:
+    batch_size: !ref <batch_size>
+    num_workers: !ref <num_workers>
+
+# Feature parameters
+n_fft: 400
+n_mels: 40
+
+####################### Model Parameters #######################################
+rnn_layers: 2
+rnn_neurons: 32
+dnn_neurons: 16
+output_neurons: 1
+
+# Models
+compute_features: !new:speechbrain.lobes.features.Fbank
+    sample_rate: !ref <sample_rate>
+    n_fft: !ref <n_fft>
+    n_mels: !ref <n_mels>
+    hop_length: !ref <time_resolution> * 1000 # in ms
+
+mean_var_norm: !new:speechbrain.processing.features.InputNormalization
+    norm_type: sentence
+
+time_drop: !new:speechbrain.augment.freq_domain_fixed.SpectrogramDrop
+    mask_len: 100
+    num_masks: 1
+    dim: 1
+
+freq_drop: !new:speechbrain.augment.freq_domain_fixed.SpectrogramDrop
+    mask_len: 27
+    num_masks: 1
+    dim: 2
+
+time_warp: !new:speechbrain.augment.freq_domain_fixed.Warping
+    warp_window: 80
+    warp_mode: bicubic
+    dim: 1
+
+toggle_time_drop: True
+toggle_freq_drop: True
+toggle_time_warp: True
+
+fea_augment: !new:speechbrain.augment.augmenter.Augmenter
+    min_augmentations: 3
+    max_augmentations: 3
+    augment_prob: 1.0
+    augmentations: [
+        !ref <time_drop>,
+        !ref <freq_drop>,
+        !ref <time_warp>
+    ]
+    enable_augmentations: [
+        !ref <toggle_time_drop>,
+        !ref <toggle_freq_drop>,
+        !ref <toggle_time_warp>
+    ]
+
+
+cnn: !new:speechbrain.nnet.containers.Sequential
+    input_shape: [null, null, !ref <n_mels>]
+    norm1: !name:speechbrain.nnet.normalization.LayerNorm
+    cnn1: !name:speechbrain.lobes.models.CRDNN.CNN_Block
+        channels: 16
+        kernel_size: (3, 3)
+    cnn2: !name:speechbrain.lobes.models.CRDNN.CNN_Block
+        channels: 32
+        kernel_size: (3, 3)
+
+rnn: !new:speechbrain.nnet.RNN.GRU
+    input_shape: [null, null, 320]
+    hidden_size: !ref <rnn_neurons>
+    num_layers: !ref <rnn_layers>
+    bidirectional: True
+
+dnn: !new:speechbrain.nnet.containers.Sequential
+    input_shape: [null, null, !ref <rnn_neurons> * 2]
+    dnn1: !name:speechbrain.lobes.models.CRDNN.DNN_Block
+        neurons: !ref <dnn_neurons>
+    dnn2: !name:speechbrain.lobes.models.CRDNN.DNN_Block
+        neurons: !ref <dnn_neurons>
+    lin: !name:speechbrain.nnet.linear.Linear
+        n_neurons: !ref <output_neurons>
+        bias: False
+
+
+model: !new:torch.nn.ModuleList
+    - [!ref <cnn>, !ref <rnn>, !ref <dnn>]
+
+modules:
+    model: !ref <model>
+    cnn: !ref <cnn>
+    rnn: !ref <rnn>
+    dnn: !ref <dnn>
+    mean_var_norm: !ref <mean_var_norm>
+
+weight_decay: 0.01
+opt_class: !name:torch.optim.AdamW
+    lr: !ref <lr>
+    weight_decay: !ref <weight_decay>
+
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+    limit: !ref <N_epochs>
+
+lr_annealing: !new:speechbrain.nnet.schedulers.LinearScheduler
+    initial_value: !ref <lr>
+    final_value: !ref <lr_final>
+    epoch_count: !ref <N_epochs>
+
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+    checkpoints_dir: !ref <save_folder>
+    recoverables:
+        model: !ref <model>
+        normalizer: !ref <mean_var_norm>
+        counter: !ref <epoch_counter>
+
+compute_BCE_cost: !name:speechbrain.nnet.losses.bce_loss
+
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+    save_file: !ref <train_log>
+
+train_stats: !name:speechbrain.utils.metric_stats.BinaryMetricStats
+test_stats: !name:speechbrain.utils.metric_stats.BinaryMetricStats
