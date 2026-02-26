@@ -9,10 +9,13 @@ Authors:
 - Mirco Ravanelli (2023)
 """
 
+from __future__ import annotations
+
 import random
 
 import torch
 import torch.nn as nn
+
 
 def _to_frame_lengths(
     lengths: torch.Tensor | None,
@@ -193,6 +196,14 @@ class Warping(torch.nn.Module):
         """
         Apply warping to the input spectrogram.
 
+        Per the SpecAugment paper (Park et al., 2019):
+        1. Choose a random center point c uniformly from [W, tau - W)
+           independently for each sample in the batch.
+        2. Choose a warp distance d uniformly from [-W, W].
+        3. The point c is warped to w = c + d.
+        4. The left region [0, c) is interpolated to fill [0, w),
+           and the right region [c, tau) fills [w, tau).
+
         Arguments
         ---------
         spectrogram : torch.Tensor
@@ -216,42 +227,55 @@ class Warping(torch.nn.Module):
         if spectrogram.dim() == 3:
             spectrogram = spectrogram.unsqueeze(1)
 
-        len_original = spectrogram.shape[2]
-        if len_original - window <= window:
+        B = spectrogram.shape[0]
+        tau = spectrogram.shape[2]
+        F = spectrogram.shape[3]
+
+        if tau - window <= window:
             return spectrogram.view(*original_size)
 
-        # Compute center and corresponding window
-        c = torch.randint(window, len_original - window, (1,))[0]
-        w = torch.randint(c - window, c + window, (1,))[0] + 1
+        # Sample center c in [W, tau - W) and distance d in [-W, W]
+        # independently per sample in the batch.
+        c = torch.randint(window, tau - window, (B,), device=spectrogram.device)
+        d = torch.randint(-window, window + 1, (B,), device=spectrogram.device)
+        w = c + d  # warp target point per sample
 
-        # Update the left part of the spectrogram
-        left = torch.nn.functional.interpolate(
-            spectrogram[:, :, :c],
-            (w, spectrogram.shape[3]),
-            mode=self.warp_mode,
-            align_corners=True,
-        )
+        # Build output without in-place mutation
+        out = torch.empty_like(spectrogram)
 
-        # Update the right part of the spectrogram.
-        # When the left part is expanded, the right part is compressed by the
-        # same factor, and vice versa.
-        right = torch.nn.functional.interpolate(
-            spectrogram[:, :, c:],
-            (len_original - w, spectrogram.shape[3]),
-            mode=self.warp_mode,
-            align_corners=True,
-        )
+        for i in range(B):
+            ci = c[i].item()
+            wi = w[i].item()
 
-        # Injecting the warped left and right parts.
-        spectrogram[:, :, :w] = left
-        spectrogram[:, :, w:] = right
-        spectrogram = spectrogram.view(*original_size)
+            # Clamp wi to [1, tau - 1] so both left and right regions are non-empty
+            wi = max(1, min(wi, tau - 1))
 
-        # Transpose if freq warping is applied.
+            # Interpolate left region [0, ci) -> [0, wi)
+            left = torch.nn.functional.interpolate(
+                spectrogram[i : i + 1, :, :ci, :],
+                (wi, F),
+                mode=self.warp_mode,
+                align_corners=True,
+            )
+
+            # Interpolate right region [ci, tau) -> [wi, tau)
+            right = torch.nn.functional.interpolate(
+                spectrogram[i : i + 1, :, ci:, :],
+                (tau - wi, F),
+                mode=self.warp_mode,
+                align_corners=True,
+            )
+
+            out[i : i + 1, :, :wi, :] = left
+            out[i : i + 1, :, wi:, :] = right
+
+        out = out.view(*original_size)
+
+        # Transpose back if freq warping was applied.
         if self.dim == 2:
-            spectrogram = spectrogram.transpose(1, 2)
+            out = out.transpose(1, 2)
 
-        return spectrogram
+        return out
 
 
 class RandomShift(torch.nn.Module):
