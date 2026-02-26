@@ -96,7 +96,7 @@ toggle_time_drop: True
 toggle_freq_drop: True
 toggle_time_warp: True
 
-fea_augment: !new:speechbrain.augment.augmenter.Augmenter
+whisper_spec_augment: !new:speechbrain.augment.augmenter.Augmenter
     min_augmentations: 3
     max_augmentations: 3
     augment_prob: 1.0
