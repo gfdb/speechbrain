@@ -95,7 +95,7 @@ aug_strategy: 'all'
 
 toggle_time_drop: True
 toggle_freq_drop: True
-toggle_time_warp: True
+toggle_time_warp: False
 
 fea_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     augmentations: [
@@ -113,7 +113,7 @@ fea_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
         !ref <toggle_freq_drop>,
         !ref <toggle_time_warp>
     ]
-  
+ 
 # Feature extraction
 compute_features: !new:speechbrain.lobes.features.Fbank
     n_mels: !ref <n_mels>

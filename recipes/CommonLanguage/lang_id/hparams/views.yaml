@@ -41,6 +41,7 @@ n_languages: 45
 emb_dim: 192 # dimensionality of the embeddings
 emb_channels: [1024, 1024, 1024, 1024, 3072]
 emb_attention_channels: 128
+grad_accumulation_factor: 1
 
 # Dataloaders
 num_workers: 4
@@ -61,9 +62,12 @@ test_dataloader_options:
 wav2aug: !new:wav2aug.gpu.Wav2Aug
     sample_rate: !ref <sample_rate>
 
+views: 4
+include_original: False
 wav_augment: !new:wav2aug.gpu.Wav2AugViews
     augmenter: !ref <wav2aug>
-    views: 4
+    views: !ref <views>
+    include_original: !ref <include_original>
 
 # Feature extraction
 compute_features: !new:speechbrain.lobes.features.Fbank
