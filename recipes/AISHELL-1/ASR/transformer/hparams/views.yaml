@@ -15,19 +15,14 @@ cer_file: !ref <output_folder>/cer.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
 
-# Data for augmentation
-NOISE_DATASET_URL: https://www.dropbox.com/scl/fi/a09pj97s5ifan81dqhi4n/noises.zip?rlkey=j8b0n9kdjdr32o1f06t0cw5b7&dl=1
-
 # Data files
 data_folder: !PLACEHOLDER # e,g./path/to/aishell
-data_folder_noise: !ref <data_folder>/noise # The noisy sequences for data augmentation will automatically be downloaded here.
 skip_prep: False
 remove_compressed_wavs: False
 ckpt_interval_minutes: 15 # save checkpoint every N min
 train_data: !ref <output_folder>/train.csv
 valid_data: !ref <output_folder>/dev.csv
 test_data: !ref <output_folder>/test.csv
-noise_annotation: !ref <save_folder>/noise.csv #The data manifest files are created by the data preparation script
 tokenizer_file: speechbrain/asr-transformer-aishell/tokenizer.ckpt
 
 ####################### Training Parameters ####################################
@@ -226,7 +221,6 @@ normalize: !new:speechbrain.processing.features.InputNormalization
     norm_type: global
     update_until_epoch: 4
 
-
 compute_features: !new:speechbrain.lobes.features.Fbank
     sample_rate: !ref <sample_rate>
     n_fft: !ref <n_fft>
@@ -234,47 +228,17 @@ compute_features: !new:speechbrain.lobes.features.Fbank
 
 ############################## Augmentation ####################################
 
-time_drop: !new:speechbrain.augment.freq_domain_fixed.SpectrogramDrop
-    mask_len: 100
-    num_masks: 1
-    dim: 1
+wav2aug: !new:wav2aug.gpu.Wav2Aug
+    sample_rate: !ref <sample_rate>
 
-freq_drop: !new:speechbrain.augment.freq_domain_fixed.SpectrogramDrop
-    mask_len: 27
-    num_masks: 1
-    dim: 2
+views: 4
+include_original: True
+wav_augment: !new:wav2aug.gpu.Wav2AugViews
+    augmenter: !ref <wav2aug>
+    views: !ref <views>
+    include_original: !ref <include_original>
 
-time_warp: !new:speechbrain.augment.freq_domain_fixed.Warping
-    warp_window: 80
-    warp_mode: bicubic
-    dim: 1
-
-min_num_aug: 1
-num_aug: 1
-batch_multiplier: 0 # 0/1 -> no batch multiplication
-concat_original: False
-aug_strategy: 'all'
-
-toggle_time_drop: True
-toggle_freq_drop: True
-toggle_time_warp: False
-
-fea_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
-    augmentations: [
-        !ref <time_drop>,
-        !ref <freq_drop>,
-        !ref <time_warp>
-    ]
-    min_num_aug: !ref <min_num_aug>
-    num_aug: !ref <num_aug>
-    batch_multiplier: !ref <batch_multiplier>
-    concat_original: !ref <concat_original>
-    aug_strategy: !ref <aug_strategy>
-    aug_toggles: [
-        !ref <toggle_time_drop>,
-        !ref <toggle_freq_drop>,
-        !ref <toggle_time_warp>
-    ]
+kl_weight: 0
 
 ############################## Logging and Pretrainer ##########################
 
