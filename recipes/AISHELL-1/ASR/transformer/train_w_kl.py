@@ -40,7 +40,7 @@ class ASR(sb.core.Brain):
         # compute features
         feats = self.hparams.compute_features(wavs)
         if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
-            feats, fea_lens = self.hparams.fea_augment(feats, wav_lens)
+            feats, wav_lens = self.hparams.fea_augment(feats, wav_lens)
             tokens_bos = self.hparams.fea_augment.replicate_labels(tokens_bos)
 
         current_epoch = self.hparams.epoch_counter.current
@@ -112,30 +112,39 @@ class ASR(sb.core.Brain):
             + (1 - self.hparams.ctc_weight) * loss_seq
         )
 
-        if stage == sb.Stage.TRAIN:
-            # Expected layout: [clean batch, dirty view 1, dirty view 2, dirty view 3]
-            num_views = 4
+        if stage == sb.Stage.TRAIN and float(self.hparams.kl_weight) != 0.0:
+            # NewAugmenter returns augmented views first and appends the clean
+            # batch when concat_original=True: [dirty views..., clean batch].
+            num_views = self.hparams.fea_augment.batch_multiplier + int(
+                self.hparams.fea_augment.concat_original
+            )
             total_batch = seq_logits.size(0)
             if total_batch % num_views != 0:
                 raise ValueError(
-                    f"KL loss expects clean + 3 augmented views, but got "
-                    f"{total_batch} seq-logit rows."
+                    f"KL loss expects a batch divisible by {num_views} views, "
+                    f"but got {total_batch} seq-logit rows."
                 )
 
             original_batch_size = total_batch // num_views
-            clean = seq_logits[:original_batch_size]
+            if not self.hparams.fea_augment.concat_original:
+                raise ValueError(
+                    "KL loss requires fea_augment.concat_original=True so the "
+                    "clean view is available as the teacher."
+                )
+
+            clean = seq_logits[-original_batch_size:]
             dirty_views = [
                 seq_logits[
                     view_idx * original_batch_size : (view_idx + 1)
                     * original_batch_size
                 ]
-                for view_idx in range(1, num_views)
+                for view_idx in range(num_views - 1)
             ]
 
             U = clean.size(1)
 
             # tokens_eos_lens are relative in [0,1], normalized by U_max (== U here)
-            lens_rel = tokens_eos_lens[:original_batch_size]
+            lens_rel = tokens_eos_lens[-original_batch_size:]
             lens_steps = (lens_rel * U).round().long().clamp(min=1, max=U)
 
             # teacher distribution (stop-grad)
