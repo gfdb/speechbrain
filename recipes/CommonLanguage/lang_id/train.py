@@ -4,6 +4,7 @@ import sys
 
 from common_language_prepare import prepare_common_language
 from hyperpyyaml import load_hyperpyyaml
+import torch.nn.functional as F
 
 import speechbrain as sb
 from speechbrain.dataio import audio_io
@@ -119,6 +120,51 @@ class LID(sb.Brain):
                 self.hparams.lr_annealing.on_batch_end(self.optimizer)
 
         loss = self.hparams.compute_cost(predictions, targets)
+
+        kl_weight = float(getattr(self.hparams, "kl_weight", 0.0))
+        if stage == sb.Stage.TRAIN and kl_weight != 0.0:
+            if not hasattr(self.hparams, "fea_augment"):
+                raise ValueError("KL loss requires fea_augment to create views.")
+
+            # NewAugmenter returns augmented views first and appends the clean
+            # batch when concat_original=True: [dirty views..., clean batch].
+            num_views = self.hparams.fea_augment.batch_multiplier + int(
+                self.hparams.fea_augment.concat_original
+            )
+            total_batch = predictions.size(0)
+            if total_batch % num_views != 0:
+                raise ValueError(
+                    f"KL loss expects a batch divisible by {num_views} views, "
+                    f"but got {total_batch} prediction rows."
+                )
+
+            original_batch_size = total_batch // num_views
+            if not self.hparams.fea_augment.concat_original:
+                raise ValueError(
+                    "KL loss requires fea_augment.concat_original=True so the "
+                    "clean view is available as the teacher."
+                )
+
+            clean = predictions[-original_batch_size:].squeeze(1)
+            dirty_views = [
+                predictions[
+                    view_idx * original_batch_size : (view_idx + 1)
+                    * original_batch_size
+                ].squeeze(1)
+                for view_idx in range(num_views - 1)
+            ]
+
+            p_clean = F.softmax(clean, dim=-1).detach()
+            kl_loss = sum(
+                F.kl_div(
+                    F.log_softmax(dirty, dim=-1),
+                    p_clean,
+                    reduction="batchmean",
+                )
+                for dirty in dirty_views
+            ) / len(dirty_views)
+
+            loss = loss + kl_weight * kl_loss
 
         if stage != sb.Stage.TRAIN:
             self.error_metrics.append(batch.id, predictions, targets, lens)
@@ -333,4 +379,3 @@ if __name__ == "__main__":
         min_key="error",
         test_loader_kwargs=hparams["test_dataloader_options"],
     )
-

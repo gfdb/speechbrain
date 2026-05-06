@@ -84,6 +84,8 @@ toggle_time_drop: True
 toggle_freq_drop: True
 toggle_time_warp: True
 
+kl_weight: 0
+
 fea_augment: !new:speechbrain.augment.new_augmenter.NewAugmenter
     augmentations: [
         !ref <time_drop>,
