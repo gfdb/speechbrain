@@ -85,8 +85,10 @@ softmax: !new:speechbrain.nnet.activations.Softmax
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
     limit: !ref <number_of_epochs>
 
+top_k: 9
 wav_augment: !new:wav2aug.gpu.Wav2Aug
   sample_rate: !ref <sample_rate>
+  top_k: !ref <top_k>
 
 mean_var_norm: !new:speechbrain.processing.features.InputNormalization
     norm_type: sentence
