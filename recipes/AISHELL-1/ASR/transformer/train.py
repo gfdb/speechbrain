@@ -33,17 +33,14 @@ class ASR(sb.core.Brain):
             wavs, wav_lens = self.hparams.wav_augment(wavs, wav_lens)
             tokens_bos = self.hparams.wav_augment.replicate_labels(tokens_bos)
 
-        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav2aug_gpu"):
-            wavs, wav_lens = self.hparams.wav2aug_gpu(wavs, wav_lens)
-            
         # compute features
         feats = self.hparams.compute_features(wavs)
-        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
-            feats, fea_lens = self.hparams.fea_augment(feats, wav_lens)
-            tokens_bos = self.hparams.fea_augment.replicate_labels(tokens_bos)
-
         current_epoch = self.hparams.epoch_counter.current
         feats = self.hparams.normalize(feats, wav_lens, epoch=current_epoch)
+        
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "fea_augment"):
+            feats, wav_lens = self.hparams.fea_augment(feats, wav_lens)
+            tokens_bos = self.hparams.fea_augment.replicate_labels(tokens_bos)
 
         # forward modules
         src = self.modules.CNN(feats)
