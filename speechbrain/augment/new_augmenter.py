@@ -17,7 +17,9 @@ class NewAugmenter(nn.Module):
         min_num_aug (int, optional): The lower bound for sampling the number of augmentations.
         num_aug (int, optional): The upper bound of number of augmentations to be applied to the batch and copies of it (if any). Defaults to 1.
         batch_multiplier (int, optional): The number of times to multiply the batch. Defaults to 0.
-        concat_original (bool, optional): Concatenates the original batch after augmentation is done. Increases `batch_size` by `batch_size`. Defaults to False.
+        concat_original (bool, optional): Concatenates the original batch before
+            the augmented copies. Increases `batch_size` by `batch_size`.
+            Defaults to False.
         aug_strategy (str, optional):
             - If aug_strategy is "random", each batch copy gets a random number (up to num_aug)
                 of randomly sampled augmentations.
@@ -207,11 +209,11 @@ class NewAugmenter(nn.Module):
         else:
             raise ValueError(f"Unsupported aug_strategy: {self.aug_strategy}")
 
-        # optionally concatenate the original batch
+        # optionally concatenate the original batch first
         if self.concat_original:
-            batch_copies.append(x)
+            batch_copies.insert(0, x)
             if lengths is not None:
-                length_copies.append(lengths)
+                length_copies.insert(0, lengths)
         
         # if there is a single batch copy
         # just return it as all the lengths will be the same

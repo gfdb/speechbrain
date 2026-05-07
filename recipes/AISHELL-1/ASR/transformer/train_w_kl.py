@@ -113,11 +113,17 @@ class ASR(sb.core.Brain):
         )
 
         if stage == sb.Stage.TRAIN and float(self.hparams.kl_weight) != 0.0:
-            # NewAugmenter returns augmented views first and appends the clean
-            # batch when concat_original=True: [dirty views..., clean batch].
-            num_views = self.hparams.fea_augment.batch_multiplier + int(
-                self.hparams.fea_augment.concat_original
-            )
+            # Wav2AugViews returns the clean batch first, followed by the
+            # augmented views: [clean batch, dirty view 1, dirty view 2, ...].
+            num_views = int(getattr(self.hparams, "views", 0))
+            if num_views == 0 and hasattr(self.hparams, "wav_augment"):
+                num_views = int(getattr(self.hparams.wav_augment, "_views", 0))
+            if num_views <= 1:
+                raise ValueError(
+                    "KL loss requires a multi-view wav_augment with a clean "
+                    "view plus at least one augmented view."
+                )
+
             total_batch = seq_logits.size(0)
             if total_batch % num_views != 0:
                 raise ValueError(
@@ -126,25 +132,19 @@ class ASR(sb.core.Brain):
                 )
 
             original_batch_size = total_batch // num_views
-            if not self.hparams.fea_augment.concat_original:
-                raise ValueError(
-                    "KL loss requires fea_augment.concat_original=True so the "
-                    "clean view is available as the teacher."
-                )
-
-            clean = seq_logits[-original_batch_size:]
+            clean = seq_logits[:original_batch_size]
             dirty_views = [
                 seq_logits[
                     view_idx * original_batch_size : (view_idx + 1)
                     * original_batch_size
                 ]
-                for view_idx in range(num_views - 1)
+                for view_idx in range(1, num_views)
             ]
 
             U = clean.size(1)
 
             # tokens_eos_lens are relative in [0,1], normalized by U_max (== U here)
-            lens_rel = tokens_eos_lens[-original_batch_size:]
+            lens_rel = tokens_eos_lens[:original_batch_size]
             lens_steps = (lens_rel * U).round().long().clamp(min=1, max=U)
 
             # teacher distribution (stop-grad)
