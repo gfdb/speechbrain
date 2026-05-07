@@ -94,10 +94,12 @@ class Wav2Vec2(HFTransformersInterface):
         )
 
         self.model.config.apply_spec_augment = apply_spec_augment
-        if apply_spec_augment and feat_mask:
-            self.model.config.mask_feature_prob = 0.008
+        if apply_spec_augment:
+            self.model.config.mask_time_length = 10
+            self.model.config.mask_time_prob = 0.065
+            self.model.config.mask_feature_prob = 0.004
             self.model.config.mask_feature_length = 64
-
+        
         # We check if inputs need to be normalized w.r.t pretrained wav2vec2
         self.load_feature_extractor(source, cache_dir=save_path)
         self.normalize_wav = self.feature_extractor.do_normalize
