@@ -68,9 +68,10 @@ normalize: !new:speechbrain.processing.features.InputNormalization
 wav2aug: !new:wav2aug.gpu.Wav2Aug
     sample_rate: !ref <sample_rate>
 
+views: 4
 wav_augment: !new:wav2aug.gpu.Wav2AugViews
     augmenter: !ref <wav2aug>
-    views: 4
+    views: !ref <views>
 
 ############################## Models ##########################################
 
