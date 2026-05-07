@@ -23,6 +23,81 @@ logger = get_logger(__name__)
 
 # Define training procedure
 class ASR(sb.core.Brain):
+    def _kl_view_config(self):
+        """Return multi-view layout metadata for KL consistency training."""
+        candidates = []
+
+        for augment_name in ("wav_augment", "fea_augment"):
+            if not hasattr(self.hparams, augment_name):
+                continue
+
+            augment = getattr(self.hparams, augment_name)
+
+            if hasattr(augment, "_views") or (
+                augment_name == "wav_augment"
+                and hasattr(self.hparams, "views")
+            ):
+                num_views = getattr(augment, "_views", None)
+                if num_views is None:
+                    num_views = getattr(self.hparams, "views")
+                include_original = getattr(
+                    augment, "_include_original", None
+                )
+                if include_original is None:
+                    include_original = getattr(
+                        self.hparams, "include_original", False
+                    )
+                candidates.append(
+                    {
+                        "name": augment_name,
+                        "num_views": int(num_views),
+                        "has_clean": bool(include_original),
+                    }
+                )
+                continue
+
+            if hasattr(augment, "batch_multiplier") or hasattr(
+                augment, "concat_original"
+            ):
+                batch_multiplier = int(getattr(augment, "batch_multiplier", 1))
+                concat_original = bool(
+                    getattr(augment, "concat_original", False)
+                )
+                candidates.append(
+                    {
+                        "name": augment_name,
+                        "num_views": batch_multiplier
+                        + int(concat_original),
+                        "has_clean": concat_original,
+                    }
+                )
+
+        candidates = [
+            candidate
+            for candidate in candidates
+            if candidate["num_views"] > 1
+        ]
+        if not candidates:
+            raise ValueError(
+                "KL loss requires a multi-view wav_augment or fea_augment."
+            )
+        if len(candidates) > 1:
+            names = ", ".join(candidate["name"] for candidate in candidates)
+            raise ValueError(
+                "KL loss found multiple multi-view augmenters "
+                f"({names}); please use only one KL view source."
+            )
+
+        config = candidates[0]
+        if not config["has_clean"]:
+            raise ValueError(
+                "KL loss requires an included clean view. Set "
+                "include_original=True for Wav2AugViews or "
+                "concat_original=True for NewAugmenter."
+            )
+
+        return config
+
     def compute_forward(self, batch, stage):
         """Forward computations from the waveform batches to the output probabilities."""
         batch = batch.to(self.device)
@@ -113,17 +188,10 @@ class ASR(sb.core.Brain):
         )
 
         if stage == sb.Stage.TRAIN and float(self.hparams.kl_weight) != 0.0:
-            # Wav2AugViews returns the clean batch first, followed by the
-            # augmented views: [clean batch, dirty view 1, dirty view 2, ...].
-            num_views = int(getattr(self.hparams, "views", 0))
-            if num_views == 0 and hasattr(self.hparams, "wav_augment"):
-                num_views = int(getattr(self.hparams.wav_augment, "_views", 0))
-            if num_views <= 1:
-                raise ValueError(
-                    "KL loss requires a multi-view wav_augment with a clean "
-                    "view plus at least one augmented view."
-                )
-
+            # Supported view augmenters use clean-first layout:
+            # [clean batch, dirty view 1, dirty view 2, ...].
+            view_config = self._kl_view_config()
+            num_views = view_config["num_views"]
             total_batch = seq_logits.size(0)
             if total_batch % num_views != 0:
                 raise ValueError(

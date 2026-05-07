@@ -231,8 +231,8 @@ compute_features: !new:speechbrain.lobes.features.Fbank
 wav2aug: !new:wav2aug.gpu.Wav2Aug
     sample_rate: !ref <sample_rate>
 
-views: 4
-include_original: True
+views: 4 # One clean view plus three augmented views.
+include_original: True # Wav2AugViews prepends the clean batch.
 wav_augment: !new:wav2aug.gpu.Wav2AugViews
     augmenter: !ref <wav2aug>
     views: !ref <views>

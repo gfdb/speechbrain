@@ -251,8 +251,8 @@ time_warp: !new:speechbrain.augment.freq_domain_fixed.Warping
 
 min_num_aug: 1
 num_aug: 1
-batch_multiplier: 0 # 0/1 -> no batch multiplication
-concat_original: False
+batch_multiplier: 3 # Three augmented copies.
+concat_original: True # Prepends the clean batch before augmented copies.
 aug_strategy: 'all'
 
 toggle_time_drop: True
