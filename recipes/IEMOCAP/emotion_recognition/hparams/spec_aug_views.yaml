@@ -31,6 +31,7 @@ wav2vec2_folder: !ref <save_folder>/wav2vec2_checkpoint
 different_speakers: False
 # which speaker is used for test set, value from 1 to 10
 test_spk_id: 1
+grad_accumulation_factor: 1
 
 # Path where data manifest files will be stored
 train_annotation: !ref <output_folder>/train.json
