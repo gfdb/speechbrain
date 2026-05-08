@@ -69,6 +69,8 @@ wav_augment: !new:wav2aug.gpu.Wav2AugViews
     views: !ref <views>
     include_original: !ref <include_original>
 
+kl_weight: 0
+
 # Feature extraction
 compute_features: !new:speechbrain.lobes.features.Fbank
     n_mels: !ref <n_mels>
