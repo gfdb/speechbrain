@@ -56,12 +56,16 @@ freeze_wav2vec2_conv: True
 wav2aug: !new:wav2aug.gpu.Wav2Aug
     sample_rate: 16000
 
-views: 4
-include_original: True
+# Default is dirty/dirty. Set include_original=True for clean/dirty.
+views: 2
+include_original: False
 wav_augment: !new:wav2aug.gpu.Wav2AugViews
     augmenter: !ref <wav2aug>
     views: !ref <views>
     include_original: !ref <include_original>
+
+kl_weight: 0
+kl_mode: clean_teacher
 
 
 ####################### Model Parameters #######################################

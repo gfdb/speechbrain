@@ -239,6 +239,7 @@ wav_augment: !new:wav2aug.gpu.Wav2AugViews
     include_original: !ref <include_original>
 
 kl_weight: 0
+kl_mode: clean_teacher
 
 ############################## Logging and Pretrainer ##########################
 

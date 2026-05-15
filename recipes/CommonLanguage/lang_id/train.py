@@ -26,6 +26,12 @@ logger = get_logger(__name__)
 
 # Brain class for Language ID training
 class LID(sb.Brain):
+    def _kl_mode(self):
+        """Return the configured consistency loss mode."""
+        return str(
+            getattr(self.hparams, "kl_mode", "clean_teacher")
+        ).lower()
+
     def _kl_view_config(self):
         """Return multi-view layout metadata for KL consistency training."""
         candidates = []
@@ -62,7 +68,9 @@ class LID(sb.Brain):
             if hasattr(augment, "batch_multiplier") or hasattr(
                 augment, "concat_original"
             ):
-                batch_multiplier = int(getattr(augment, "batch_multiplier", 1))
+                batch_multiplier = max(
+                    1, int(getattr(augment, "batch_multiplier", 1))
+                )
                 concat_original = bool(
                     getattr(augment, "concat_original", False)
                 )
@@ -92,11 +100,15 @@ class LID(sb.Brain):
             )
 
         config = candidates[0]
-        if not config["has_clean"]:
+        if self._kl_mode() == "clean_teacher" and not config["has_clean"]:
             raise ValueError(
                 "KL loss requires an included clean view. Set "
                 "include_original=True for Wav2AugViews or "
                 "concat_original=True for NewAugmenter."
+            )
+        if self._kl_mode() not in {"clean_teacher", "bidirectional"}:
+            raise ValueError(
+                "kl_mode must be 'clean_teacher' or 'bidirectional'."
             )
 
         return config
@@ -208,24 +220,48 @@ class LID(sb.Brain):
                 )
 
             original_batch_size = total_batch // num_views
-            clean = predictions[:original_batch_size].squeeze(1)
-            dirty_views = [
+            view_logits = [
                 predictions[
                     view_idx * original_batch_size : (view_idx + 1)
                     * original_batch_size
                 ].squeeze(1)
-                for view_idx in range(1, num_views)
+                for view_idx in range(num_views)
             ]
 
-            p_clean = F.softmax(clean, dim=-1).detach()
-            kl_loss = sum(
-                F.kl_div(
-                    F.log_softmax(dirty, dim=-1),
-                    p_clean,
-                    reduction="batchmean",
-                )
-                for dirty in dirty_views
-            ) / len(dirty_views)
+            if self._kl_mode() == "clean_teacher":
+                clean = view_logits[0]
+                dirty_views = view_logits[1:]
+                p_clean = F.softmax(clean, dim=-1).detach()
+                kl_loss = sum(
+                    F.kl_div(
+                        F.log_softmax(dirty, dim=-1),
+                        p_clean,
+                        reduction="batchmean",
+                    )
+                    for dirty in dirty_views
+                ) / len(dirty_views)
+            else:
+                pair_losses = []
+                for left_idx in range(num_views):
+                    for right_idx in range(left_idx + 1, num_views):
+                        left = view_logits[left_idx]
+                        right = view_logits[right_idx]
+                        pair_losses.append(
+                            0.5
+                            * (
+                                F.kl_div(
+                                    F.log_softmax(left, dim=-1),
+                                    F.softmax(right, dim=-1),
+                                    reduction="batchmean",
+                                )
+                                + F.kl_div(
+                                    F.log_softmax(right, dim=-1),
+                                    F.softmax(left, dim=-1),
+                                    reduction="batchmean",
+                                )
+                            )
+                        )
+                kl_loss = sum(pair_losses) / len(pair_losses)
 
             loss = loss + kl_weight * kl_loss
 

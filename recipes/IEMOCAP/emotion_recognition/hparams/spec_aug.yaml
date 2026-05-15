@@ -31,6 +31,7 @@ valid_annotation: !ref <output_folder>/valid.json
 test_annotation: !ref <output_folder>/test.json
 split_ratio: [80, 10, 10]
 skip_prep: False
+grad_accumulation_factor: 1
 
 # The train logger writes training statistics to a file, as well as stdout.
 train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
@@ -62,8 +63,17 @@ dataloader_options:
     num_workers: 2  # 2 on linux but 0 works on windows
     drop_last: False
 
+# Wav2vec2 internal SpecAugment views. Defaults to one masked pass, no clean
+# view, and no KL. Set concat_original=True and batch_multiplier=3 for
+# [clean, aug1, aug2, aug3].
+batch_multiplier: 1
+concat_original: False
+kl_weight: 0
+kl_mode: clean_teacher
+
 time_mask: True
 feat_mask: True
+
 # Wav2vec2 encoder
 wav2vec2: !new:speechbrain.integrations.huggingface.wav2vec2.Wav2Vec2
     source: !ref <wav2vec2_hub>

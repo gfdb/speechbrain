@@ -23,6 +23,12 @@ logger = get_logger(__name__)
 
 # Define training procedure
 class ASR(sb.core.Brain):
+    def _kl_mode(self):
+        """Return the configured consistency loss mode."""
+        return str(
+            getattr(self.hparams, "kl_mode", "clean_teacher")
+        ).lower()
+
     def _kl_view_config(self):
         """Return multi-view layout metadata for KL consistency training."""
         candidates = []
@@ -59,7 +65,9 @@ class ASR(sb.core.Brain):
             if hasattr(augment, "batch_multiplier") or hasattr(
                 augment, "concat_original"
             ):
-                batch_multiplier = int(getattr(augment, "batch_multiplier", 1))
+                batch_multiplier = max(
+                    1, int(getattr(augment, "batch_multiplier", 1))
+                )
                 concat_original = bool(
                     getattr(augment, "concat_original", False)
                 )
@@ -89,11 +97,15 @@ class ASR(sb.core.Brain):
             )
 
         config = candidates[0]
-        if not config["has_clean"]:
+        if self._kl_mode() == "clean_teacher" and not config["has_clean"]:
             raise ValueError(
                 "KL loss requires an included clean view. Set "
                 "include_original=True for Wav2AugViews or "
                 "concat_original=True for NewAugmenter."
+            )
+        if self._kl_mode() not in {"clean_teacher", "bidirectional"}:
+            raise ValueError(
+                "kl_mode must be 'clean_teacher' or 'bidirectional'."
             )
 
         return config
@@ -188,8 +200,6 @@ class ASR(sb.core.Brain):
         )
 
         if stage == sb.Stage.TRAIN and float(self.hparams.kl_weight) != 0.0:
-            # Supported view augmenters use clean-first layout:
-            # [clean batch, dirty view 1, dirty view 2, ...].
             view_config = self._kl_view_config()
             num_views = view_config["num_views"]
             total_batch = seq_logits.size(0)
@@ -200,43 +210,83 @@ class ASR(sb.core.Brain):
                 )
 
             original_batch_size = total_batch // num_views
-            clean = seq_logits[:original_batch_size]
-            dirty_views = [
+            view_logits = [
                 seq_logits[
                     view_idx * original_batch_size : (view_idx + 1)
                     * original_batch_size
                 ]
-                for view_idx in range(1, num_views)
+                for view_idx in range(num_views)
             ]
 
-            U = clean.size(1)
+            U = view_logits[0].size(1)
 
-            # tokens_eos_lens are relative in [0,1], normalized by U_max (== U here)
-            lens_rel = tokens_eos_lens[:original_batch_size]
-            lens_steps = (lens_rel * U).round().long().clamp(min=1, max=U)
+            lens_steps_by_view = []
+            for view_idx in range(num_views):
+                start = view_idx * original_batch_size
+                end = (view_idx + 1) * original_batch_size
+                lens_rel = tokens_eos_lens[start:end]
+                lens_steps_by_view.append(
+                    (lens_rel * U).round().long().clamp(min=1, max=U)
+                )
 
-            # teacher distribution (stop-grad)
-            p_clean = F.softmax(clean, dim=-1).detach()
+            step_ids = torch.arange(U, device=view_logits[0].device)[None, :]
 
-            # padding mask over token steps
-            step_ids = torch.arange(U, device=clean.device)[None, :]
-            mask = (step_ids < lens_steps[:, None]).float()
-
-            def masked_kl(student_logits: torch.Tensor) -> torch.Tensor:
-                # student log-probs over vocab
+            def masked_kl(
+                student_logits: torch.Tensor,
+                target_logits: torch.Tensor,
+                lens_steps: torch.Tensor,
+                detach_target: bool,
+            ) -> torch.Tensor:
+                target_probs = F.softmax(target_logits, dim=-1)
+                if detach_target:
+                    target_probs = target_probs.detach()
                 log_p_student = F.log_softmax(student_logits, dim=-1)
-
-                # KL per step: sum over vocab -> [B, U]
                 kl_per_step = F.kl_div(
-                    log_p_student, p_clean, reduction="none"
+                    log_p_student, target_probs, reduction="none"
                 ).sum(dim=-1)
-
-                # average only over valid (non-pad) steps
+                mask = (step_ids < lens_steps[:, None]).float()
                 return (kl_per_step * mask).sum() / mask.sum().clamp_min(1.0)
 
-            kl_loss = sum(masked_kl(dirty) for dirty in dirty_views) / len(
-                dirty_views
-            )
+            if self._kl_mode() == "clean_teacher":
+                clean = view_logits[0]
+                dirty_views = view_logits[1:]
+                kl_loss = sum(
+                    masked_kl(
+                        dirty,
+                        clean,
+                        lens_steps_by_view[0],
+                        detach_target=True,
+                    )
+                    for dirty in dirty_views
+                ) / len(dirty_views)
+            else:
+                pair_losses = []
+                for left_idx in range(num_views):
+                    for right_idx in range(left_idx + 1, num_views):
+                        left = view_logits[left_idx]
+                        right = view_logits[right_idx]
+                        lens_steps = torch.minimum(
+                            lens_steps_by_view[left_idx],
+                            lens_steps_by_view[right_idx],
+                        )
+                        pair_losses.append(
+                            0.5
+                            * (
+                                masked_kl(
+                                    left,
+                                    right,
+                                    lens_steps,
+                                    detach_target=False,
+                                )
+                                + masked_kl(
+                                    right,
+                                    left,
+                                    lens_steps,
+                                    detach_target=False,
+                                )
+                            )
+                        )
+                kl_loss = sum(pair_losses) / len(pair_losses)
 
             loss = loss + float(self.hparams.kl_weight) * kl_loss
 

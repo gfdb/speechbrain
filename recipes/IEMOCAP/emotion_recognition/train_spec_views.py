@@ -1,35 +1,8 @@
 #!/usr/bin/env python3
-"""Recipe for training emotion recognition with wav2vec2 SpecAugment views.
+"""Recipe for IEMOCAP emotion recognition with optional multi-view KL.
 
-Creates multiple views of each batch by toggling the internal SpecAugment
-inside HuggingFace wav2vec2.  For example, with include_clean=True and
-spec_aug_views=4 you get:
-
-    view 0  ->  wav2vec2 forward with SpecAugment OFF   (clean)
-    view 1  ->  wav2vec2 forward with SpecAugment ON    (random mask 1)
-    view 2  ->  wav2vec2 forward with SpecAugment ON    (random mask 2)
-    view 3  ->  wav2vec2 forward with SpecAugment ON    (random mask 3)
-
-All four representations are pooled, projected, and their losses averaged.
-
-Key CLI overrides
------------------
-    --spec_aug_views 4       total number of views (clean + augmented)
-    --num_clean_views 1      how many of those views skip SpecAugment
-
-Examples
---------
-    # 1 clean + 3 augmented
-    python train_spec_views.py hparams/spec_aug_views.yaml \\
-        --data_folder /path/to/IEMOCAP --spec_aug_views 4 --num_clean_views 1
-
-    # 2 clean, no augmented (vanilla concat)
-    python train_spec_views.py hparams/spec_aug_views.yaml \\
-        --data_folder /path/to/IEMOCAP --spec_aug_views 2 --num_clean_views 2
-
-    # 2 augmented, no clean
-    python train_spec_views.py hparams/spec_aug_views.yaml \\
-        --data_folder /path/to/IEMOCAP --spec_aug_views 2 --num_clean_views 0
+This is the consolidated entrypoint for wav2vec2 internal SpecAugment views,
+Wav2Aug waveform views, and optional KL consistency.
 
 Authors
  * Yingzhi WANG 2021
@@ -40,52 +13,152 @@ import os
 import sys
 
 import torch
+import torch.nn.functional as F
 from hyperpyyaml import load_hyperpyyaml
 
 import speechbrain as sb
 
 
 class EmoIdBrain(sb.Brain):
+    def _kl_mode(self):
+        """Return the configured consistency loss mode."""
+        return str(
+            getattr(self.hparams, "kl_mode", "clean_teacher")
+        ).lower()
+
+    def _kl_view_config(self):
+        """Return multi-view layout metadata for KL consistency training."""
+        if hasattr(self.hparams, "batch_multiplier"):
+            batch_multiplier = max(1, int(self.hparams.batch_multiplier))
+            concat_original = bool(
+                getattr(self.hparams, "concat_original", False)
+            )
+            if self._kl_mode() == "clean_teacher" and not concat_original:
+                raise ValueError(
+                    "KL loss requires an included clean view. Use "
+                    "concat_original=True or include_original=True."
+                )
+            if self._kl_mode() not in {"clean_teacher", "bidirectional"}:
+                raise ValueError(
+                    "kl_mode must be 'clean_teacher' or 'bidirectional'."
+                )
+            return {
+                "num_views": batch_multiplier + int(concat_original),
+                "has_clean": concat_original,
+            }
+
+        candidates = []
+        for augment_name in ("wav_augment",):
+            if not hasattr(self.hparams, augment_name):
+                continue
+
+            augment = getattr(self.hparams, augment_name)
+            if hasattr(augment, "_views") or (
+                augment_name == "wav_augment"
+                and hasattr(self.hparams, "views")
+            ):
+                num_views = getattr(augment, "_views", None)
+                if num_views is None:
+                    num_views = getattr(self.hparams, "views")
+                include_original = getattr(
+                    augment, "_include_original", None
+                )
+                if include_original is None:
+                    include_original = getattr(
+                        self.hparams, "include_original", False
+                    )
+                candidates.append(
+                    {
+                        "num_views": int(num_views),
+                        "has_clean": bool(include_original),
+                    }
+                )
+                continue
+
+            if hasattr(augment, "batch_multiplier") or hasattr(
+                augment, "concat_original"
+            ):
+                batch_multiplier = max(
+                    1, int(getattr(augment, "batch_multiplier", 1))
+                )
+                concat_original = bool(
+                    getattr(augment, "concat_original", False)
+                )
+                candidates.append(
+                    {
+                        "num_views": batch_multiplier
+                        + int(concat_original),
+                        "has_clean": concat_original,
+                    }
+                )
+
+        candidates = [
+            candidate
+            for candidate in candidates
+            if candidate["num_views"] > 1
+        ]
+        if not candidates:
+            raise ValueError(
+                "KL loss requires a multi-view wav2vec2 SpecAugment or "
+                "wav_augment setup."
+            )
+        if len(candidates) > 1:
+            raise ValueError(
+                "KL loss found multiple multi-view augmenters; please use "
+                "only one KL view source."
+            )
+        if self._kl_mode() == "clean_teacher" and not candidates[0]["has_clean"]:
+            raise ValueError(
+                "KL loss requires an included clean view. Use "
+                "concat_original=True or include_original=True."
+            )
+        if self._kl_mode() not in {"clean_teacher", "bidirectional"}:
+            raise ValueError(
+                "kl_mode must be 'clean_teacher' or 'bidirectional'."
+            )
+
+        return candidates[0]
+
     def compute_forward(self, batch, stage):
-        """Run wav2vec2 multiple times with / without SpecAugment."""
+        """Run wav2vec2, optionally creating multiple train-time views."""
         batch = batch.to(self.device)
         wavs, lens = batch.sig
 
-        # ---- During training, build multi-view representations ----
-        if stage == sb.Stage.TRAIN:
-            total_views = self.hparams.spec_aug_views
-            n_clean = self.hparams.num_clean_views
-            n_aug = total_views - n_clean
+        if hasattr(self.hparams, "batch_multiplier"):
+            if stage == sb.Stage.TRAIN:
+                w2v_cfg = self.modules.wav2vec2.model.config
+                view_outputs = []
+                view_lens = []
 
-            w2v_cfg = self.modules.wav2vec2.model.config
-            view_outputs = []
+                # Clean view first so KL can use the first batch block as teacher.
+                if getattr(self.hparams, "concat_original", False):
+                    w2v_cfg.apply_spec_augment = False
+                    view_outputs.append(
+                        self.modules.wav2vec2(wavs, lens)
+                    )
+                    view_lens.append(lens)
 
-            # Clean views — batched forward pass, SpecAugment OFF
-            if n_clean > 0:
-                w2v_cfg.apply_spec_augment = False
-                clean_wavs = wavs.repeat(n_clean, 1)         # (B*n_clean, T_wav)
-                clean_lens = lens.repeat(n_clean)             # (B*n_clean,)
-                view_outputs.append(
-                    self.modules.wav2vec2(clean_wavs, clean_lens)
-                )
+                # Augmented copies share one wav2vec2 call; each row samples its
+                # own internal time/channel masks.
+                batch_multiplier = max(1, int(self.hparams.batch_multiplier))
+                if batch_multiplier > 0:
+                    w2v_cfg.apply_spec_augment = True
+                    aug_wavs = wavs.repeat(batch_multiplier, 1)
+                    aug_lens = lens.repeat(batch_multiplier)
+                    view_outputs.append(
+                        self.modules.wav2vec2(aug_wavs, aug_lens)
+                    )
+                    view_lens.append(aug_lens)
 
-            # Augmented views — batched forward pass, SpecAugment ON;
-            # _compute_mask_indices draws independent masks per sample,
-            # so repeat(n, 1) in a single pass == n separate passes.
-            if n_aug > 0:
-                w2v_cfg.apply_spec_augment = True
-                aug_wavs = wavs.repeat(n_aug, 1)             # (B*n_aug, T_wav)
-                aug_lens = lens.repeat(n_aug)                 # (B*n_aug,)
-                view_outputs.append(
-                    self.modules.wav2vec2(aug_wavs, aug_lens)
-                )
-
-            # (B*n_clean, T, D) + (B*n_aug, T, D) -> (B*V, T, D)
-            outputs = torch.cat(view_outputs, dim=0)         # (B*V, T, D)
-            lens = lens.repeat(total_views)                   # (B*V,)
+                outputs = torch.cat(view_outputs, dim=0)
+                lens = torch.cat(view_lens, dim=0)
+            else:
+                self.modules.wav2vec2.model.config.apply_spec_augment = False
+                outputs = self.modules.wav2vec2(wavs, lens)
         else:
-            # Validation / test: single clean forward pass
-            self.modules.wav2vec2.model.config.apply_spec_augment = False
+            if stage == sb.Stage.TRAIN and hasattr(self.hparams, "wav_augment"):
+                wavs, lens = self.hparams.wav_augment(wavs, lens)
+
             outputs = self.modules.wav2vec2(wavs, lens)
 
         # Pooling  -> (B*V, D)  or  (B, D)
@@ -93,22 +166,93 @@ class EmoIdBrain(sb.Brain):
         outputs = outputs.view(outputs.shape[0], -1)
 
         # Classifier head
-        outputs = self.modules.output_mlp(outputs)
-        outputs = self.hparams.log_softmax(outputs)
-        return outputs
+        logits = self.modules.output_mlp(outputs)
+        log_probs = self.hparams.log_softmax(logits)
+        return log_probs, logits
 
     def compute_objectives(self, predictions, batch, stage):
         """Compute NLL loss, replicating labels for multi-view training."""
         emoid, _ = batch.emo_encoded
         emoid = emoid.squeeze(1)
 
-        if stage == sb.Stage.TRAIN:
-            total_views = self.hparams.spec_aug_views
-            emoid = emoid.repeat(total_views)
+        log_probs, logits = predictions
 
-        loss = self.hparams.compute_cost(predictions, emoid)
+        if stage == sb.Stage.TRAIN and hasattr(self.hparams, "batch_multiplier"):
+            batch_multiplier = max(1, int(self.hparams.batch_multiplier))
+            total_views = batch_multiplier + int(
+                getattr(self.hparams, "concat_original", False)
+            )
+            emoid = emoid.repeat(total_views)
+        elif stage == sb.Stage.TRAIN:
+            if hasattr(self.hparams, "wav_augment"):
+                emoid = self.hparams.wav_augment.replicate_labels(emoid)
+
+        loss = self.hparams.compute_cost(log_probs, emoid)
+
+        kl_weight = float(getattr(self.hparams, "kl_weight", 0.0))
+        if stage == sb.Stage.TRAIN and kl_weight != 0.0:
+            view_config = self._kl_view_config()
+            total_views = view_config["num_views"]
+            total_batch = logits.size(0)
+            if total_batch % total_views != 0:
+                raise ValueError(
+                    f"KL loss expects a batch divisible by {total_views} "
+                    f"views, but got {total_batch} logits rows."
+                )
+
+            original_batch_size = total_batch // total_views
+            view_logits = [
+                logits[
+                    view_idx * original_batch_size : (view_idx + 1)
+                    * original_batch_size
+                ]
+                for view_idx in range(total_views)
+            ]
+
+            if self._kl_mode() == "clean_teacher":
+                clean = view_logits[0]
+                dirty_views = view_logits[1:]
+                if not dirty_views:
+                    raise ValueError(
+                        "KL loss requires at least one augmented/dirty view."
+                    )
+
+                p_clean = F.softmax(clean, dim=-1).detach()
+                kl_loss = sum(
+                    F.kl_div(
+                        F.log_softmax(dirty, dim=-1),
+                        p_clean,
+                        reduction="batchmean",
+                    )
+                    for dirty in dirty_views
+                ) / len(dirty_views)
+            else:
+                pair_losses = []
+                for left_idx in range(total_views):
+                    for right_idx in range(left_idx + 1, total_views):
+                        left = view_logits[left_idx]
+                        right = view_logits[right_idx]
+                        pair_losses.append(
+                            0.5
+                            * (
+                                F.kl_div(
+                                    F.log_softmax(left, dim=-1),
+                                    F.softmax(right, dim=-1),
+                                    reduction="batchmean",
+                                )
+                                + F.kl_div(
+                                    F.log_softmax(right, dim=-1),
+                                    F.softmax(left, dim=-1),
+                                    reduction="batchmean",
+                                )
+                            )
+                        )
+                kl_loss = sum(pair_losses) / len(pair_losses)
+
+            loss = loss + (kl_weight * kl_loss)
+
         if stage != sb.Stage.TRAIN:
-            self.error_metrics.append(batch.id, predictions, emoid)
+            self.error_metrics.append(batch.id, log_probs, emoid)
 
         return loss
 
@@ -218,8 +362,7 @@ def dataio_prep(hparams):
     return datasets
 
 
-# RECIPE BEGINS!
-if __name__ == "__main__":
+def main():
     hparams_file, run_opts, overrides = sb.parse_arguments(sys.argv[1:])
 
     sb.utils.distributed.ddp_init_group(run_opts)
@@ -280,3 +423,7 @@ if __name__ == "__main__":
         min_key="error_rate",
         test_loader_kwargs=hparams["dataloader_options"],
     )
+
+
+if __name__ == "__main__":
+    main()
